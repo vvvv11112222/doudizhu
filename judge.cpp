@@ -384,8 +384,6 @@ QString Judge::lastPlayString() const {
 // judge.cpp
 
 void Judge::nextTurn() {
-    // 0. 检查游戏是否已经全部结束（例如只剩1个人没出完，或者前3名已出炉）
-    // 这里假设 finishOrder 存的是已赢的玩家ID
     if (finishOrder.size() >= players.size() - 1) {
         emit gameFinished();
         return;
@@ -412,10 +410,10 @@ void Judge::nextTurn() {
         qInfo() << "一轮结束，玩家" << currentTurn << "获得新出牌权";
         lastCards.clear(); // 清空上家牌，意味着可以出任意牌
         lastPlayer = -1;   // 重置 lastPlayer（可选，或者设为 currentTurn）
-
-        // 通知 UI 清空桌面上显示的“上家出牌”
-        // 你可能需要加一个信号，或者利用 lastPlayUpdated 传空数据
-        // emit lastPlayUpdated(-1);
+        roundOver = true;
+    }
+    if (lastPlayer == -1) {
+        roundOver = true;
     }
     if (roundOver) {
         startNewRound(currentTurn);
@@ -443,15 +441,20 @@ void Judge::aiPlay() {
     std::vector<Card> chosen = ai->decideToMove(lastCards);
     if (chosen.empty()) {
         // pass
+         qInfo() << "AI" << currentTurn << "选择过牌";
         lastWasPass = true;
-        lastPlayer = currentTurn;
+        playerPassedRound[currentTurn] = true;
+         playerLastPlays[currentTurn].clear();
+        emit lastPlayUpdated(currentTurn);
     } else {
         // 执行出牌（Judge 负责移除手牌 / 更新状态）
+        qInfo() << "AI" << currentTurn << "出牌:" << chosen.size() << "张";
         players[currentTurn]->playCards(chosen);
         checkVictory(currentTurn);
         lastPlayer = currentTurn;
         lastCards = chosen;
         lastWasPass = false;
+        playerPassedRound[currentTurn] = false;
         emit playerHandChanged(currentTurn);
         playerLastPlays[currentTurn] = chosen;
         emit lastPlayUpdated(currentTurn);
