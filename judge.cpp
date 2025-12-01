@@ -3,6 +3,7 @@
 #include <QTimer>
 #include <algorithm>
 #include <iostream>
+#include <map>
 #include "card.h"
 #include "player.h"
 #include "AIPlayer.h"
@@ -60,7 +61,20 @@ void Judge::beginFirstTurn() {
         emit playerTurnStart(currentTurn);
     }
 }
+static bool isRocket(const std::vector<Card>& cards) {
+    if (cards.size() != 2) return false;
+
+    bool hasSmall = false;
+    bool hasBig = false;
+    for (const auto& c : cards) {
+        if (c.getRank() == Rank::S) hasSmall = true;
+        else if (c.getRank() == Rank::B) hasBig = true;
+    }
+    return hasSmall && hasBig;
+}
+
 static bool isBomb(const std::vector<Card>& cards) {
+    if (isRocket(cards)) return true;
     int cardCount = cards.size();
     if (cardCount < 4) return false;
 
@@ -71,7 +85,6 @@ static bool isBomb(const std::vector<Card>& cards) {
     }
     if (jokerCount == 4) return true;
 
-    // 同点数炸弹（4张及以上同rank）
     std::string firstRank = cards[0].getRankString();
     bool sameRank = true;
     for (const auto& c : cards) {
@@ -118,6 +131,13 @@ static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& l
     if (last.empty()) return true;
 
     // 2. 炸弹优先级最高（除了更大的炸弹）
+    bool currentIsRocket = isRocket(current);
+    bool lastIsRocket = isRocket(last);
+    if (currentIsRocket || lastIsRocket) {
+        if (currentIsRocket && !lastIsRocket) return true;  // 王炸压一切
+        if (!currentIsRocket && lastIsRocket) return false; // 任何牌压不住王炸
+        return false; // 双方都是王炸，不能再压
+    }
     bool currentIsBomb = isBomb(current);
     bool lastIsBomb = isBomb(last);
 
@@ -142,7 +162,6 @@ static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& l
         // 同类型炸弹：比点数（取第一张牌的rank值）
         return current[0].getRankInt() > last[0].getRankInt();
     }
-
     // 4. 非炸弹：必须牌型相同、张数相同，且点数更大
     if (current.size() != last.size()) return false;
 
@@ -177,16 +196,16 @@ Judge::Judge(QObject *parent)
 
 
 bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
-    // 1. 空牌无效
     if (playCards.empty()) return false;
 
     int cardCount = playCards.size();
 
-    // 2. 单张（1张）：有效
+    // 1. 单张
     if (cardCount == 1) return true;
 
-    // 3. 对子（2张同点数）
+    // 2. 对子
     if (cardCount == 2) {
+        if (isRocket(playCards)) return true;
         return playCards[0].getRank() == playCards[1].getRank();
     }
 
@@ -202,9 +221,11 @@ bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
         for (const auto& c : playCards) {
             rankCount[c.getRankString()]++;
         }
-        // 必须有一个rank出现3次，另一个出现1次
-        return (rankCount.size() == 2) &&
-               (rankCount.begin()->second == 3 || rankCount.begin()->second == 1);
+        // 必须有一个rank出现3次，另一个出现1次（否则继续检查是否是炸弹）
+        if ((rankCount.size() == 2) &&
+            (rankCount.begin()->second == 3 || rankCount.begin()->second == 1)) {
+            return true;
+        }
     }
 
     // 6. 三带二（3张同点数 + 2张同点数）
@@ -214,32 +235,38 @@ bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
             rankCount[c.getRankString()]++;
         }
         // 必须有一个rank出现3次，另一个出现2次
-        if (rankCount.size() != 2) return false;
-        auto it = rankCount.begin();
-        int cnt1 = it->second;
-        int cnt2 = (++it)->second;
-        return (cnt1 == 3 && cnt2 == 2) || (cnt1 == 2 && cnt2 == 3);
-    }
+        if (rankCount.size() == 2) {
+            auto it = rankCount.begin();
+            int cnt1 = it->second;
+            int cnt2 = (++it)->second;
+            if ((cnt1 == 3 && cnt2 == 2) || (cnt1 == 2 && cnt2 == 3)) {
+                return true;
+            }
+        }
 
-    // 7. 顺子（5张连续点数，不包含2和王）
-    if (cardCount == 5) {
+        // 顺子（5张连续点数，不包含2和王）
+        bool isStraight = true;
         std::vector<Rank> ranks;
         for (const auto& c : playCards) {
             Rank val = c.getRank();
             // 顺子不能包含2、小王、大王
             if (val == Rank::Two || val >= Rank::S) {
-                return false;
+                isStraight = false;
+                break;
             }
             ranks.push_back(val);
         }
-        std::sort(ranks.begin(), ranks.end());
-        // 检查连续
-        for (int i = 1; i < 5; i++) {
-            if (static_cast<int>(ranks[i]) != static_cast<int>(ranks[i-1]) + 1) {
-                return false;
+        if (isStraight) {
+            std::sort(ranks.begin(), ranks.end());
+            // 检查连续
+            for (int i = 1; i < 5; i++) {
+                if (static_cast<int>(ranks[i]) != static_cast<int>(ranks[i-1]) + 1) {
+                    isStraight = false;
+                    break;
+                }
             }
         }
-        return true;
+        if (isStraight) return true;
     }
 
     // 8. 炸弹（4张及以上同点数、同花顺、四王）
@@ -248,7 +275,6 @@ bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
     // 其他牌型（如连对、钢板等）可根据需求扩展
     return false;
 }
-
 bool Judge::playHumanCard(const std::vector<Card>& playCards) {
     if (finishOrder.size()==4) return false;
     if (currentTurn != 0) {
