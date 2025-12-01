@@ -26,6 +26,7 @@ public:
     // 只读方法，供 MainWindow 获取显示数据
     Q_INVOKABLE std::vector<Card> getHandCopy() const;
     Q_INVOKABLE std::vector<Card> getSelectedCards() const; // 返回当前被选的牌索引
+    bool isCardSelected(const Card& card) const;
     void resetSelection() { selectedCards_.clear(); }
 signals:
     // HumanPlayer 发给 GameManager 的信号

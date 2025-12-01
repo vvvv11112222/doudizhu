@@ -76,7 +76,6 @@ void HumanPlayer::onUserRequestHint()
     emit requestHintFromJudge(ID);
 }
 
-// 供 UI 获取当前手牌（只读拷贝）
 std::vector<Card> HumanPlayer::getHandCopy() const
 {
     return handCards;
@@ -86,6 +85,11 @@ std::vector<Card> HumanPlayer::getHandCopy() const
 std::vector<Card> HumanPlayer::getSelectedCards() const
 {
     return selectedCards_;
+}
+
+bool HumanPlayer::isCardSelected(const Card& card) const
+{
+    return std::find(selectedCards_.begin(), selectedCards_.end(), card) != selectedCards_.end();
 }
 
 // 内部：把 selectedCards_ 转换为 Card 向量（按选中顺序）

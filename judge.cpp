@@ -126,53 +126,146 @@ static bool isBomb(const std::vector<Card>& cards) {
 
     return false;
 }
+enum class PlayType {
+    Invalid,
+    Single,
+    Pair,
+    Trips,
+    TripsWithSingle,
+    TripsWithPair,
+    StraightFive,
+    Bomb,
+    Rocket
+};
+
+struct PlayInfo {
+    PlayType type{PlayType::Invalid};
+    int primaryRank{0};
+    int size{0};
+};
+
+static PlayInfo analyzePlay(const std::vector<Card>& cards) {
+    PlayInfo info;
+    info.size = static_cast<int>(cards.size());
+    if (cards.empty()) return info;
+
+    // 事先对 rank 做一次统计，便于后续复用
+    std::map<int, int> rankCount;
+    for (const auto& c : cards) {
+        rankCount[c.getRankInt()]++;
+    }
+
+    if (isRocket(cards)) {
+        info.type = PlayType::Rocket;
+        return info;
+    }
+    if (isBomb(cards)) {
+        info.type = PlayType::Bomb;
+        info.primaryRank = cards[0].getRankInt();
+        return info;
+    }
+
+    if (cards.size() == 1) {
+        info.type = PlayType::Single;
+        info.primaryRank = cards[0].getRankInt();
+        return info;
+    }
+
+    if (cards.size() == 2 && rankCount.size() == 1) {
+        info.type = PlayType::Pair;
+        info.primaryRank = rankCount.begin()->first;
+        return info;
+    }
+
+    if (cards.size() == 3 && rankCount.size() == 1) {
+        info.type = PlayType::Trips;
+        info.primaryRank = rankCount.begin()->first;
+        return info;
+    }
+
+    if (cards.size() == 4) {
+        for (const auto& kv : rankCount) {
+            if (kv.second == 3) {
+                info.type = PlayType::TripsWithSingle;
+                info.primaryRank = kv.first;
+                return info;
+            }
+        }
+    }
+
+    if (cards.size() == 5) {
+        for (const auto& kv : rankCount) {
+            if (kv.second == 3) {
+                // 三带二
+                info.type = PlayType::TripsWithPair;
+                info.primaryRank = kv.first;
+                return info;
+            }
+        }
+
+        // 顺子（5 张，且不含 2 和大小王）
+        bool invalidRank = std::any_of(cards.begin(), cards.end(), [](const Card& c) {
+            return c.getRank() == Rank::Two || c.getRank() == Rank::S || c.getRank() == Rank::B;
+        });
+        if (!invalidRank) {
+            std::vector<int> ranks;
+            for (const auto& c : cards) ranks.push_back(c.getRankInt());
+            std::sort(ranks.begin(), ranks.end());
+            bool consecutive = true;
+            for (int i = 1; i < 5; ++i) {
+                if (ranks[i] != ranks[i - 1] + 1) {
+                    consecutive = false;
+                    break;
+                }
+            }
+            if (consecutive) {
+                info.type = PlayType::StraightFive;
+                info.primaryRank = ranks.back();
+                return info;
+            }
+        }
+    }
+
+    return info;
+}
+
 static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& last) {
-    // 1. 第一次出牌（last 为空）：current 有效则可出
     if (last.empty()) return true;
 
-    // 2. 炸弹优先级最高（除了更大的炸弹）
-    bool currentIsRocket = isRocket(current);
-    bool lastIsRocket = isRocket(last);
-    if (currentIsRocket || lastIsRocket) {
-        if (currentIsRocket && !lastIsRocket) return true;  // 王炸压一切
-        if (!currentIsRocket && lastIsRocket) return false; // 任何牌压不住王炸
-        return false; // 双方都是王炸，不能再压
-    }
-    bool currentIsBomb = isBomb(current);
-    bool lastIsBomb = isBomb(last);
+    PlayInfo currentInfo = analyzePlay(current);
+    PlayInfo lastInfo = analyzePlay(last);
 
-    if (currentIsBomb && !lastIsBomb) return true; // 炸弹压非炸弹
-    if (!currentIsBomb && lastIsBomb) return false; // 非炸弹压不住炸弹
-
-    // 3. 都是炸弹：比大小（张数多的大；张数相同比点数；同花顺 < 同点数炸弹）
-    if (currentIsBomb && lastIsBomb) {
-        int currentSize = current.size();
-        int lastSize = last.size();
-        if (currentSize != lastSize) return currentSize > lastSize;
-
-        // 张数相同：同点数炸弹 > 同花顺
-        bool currentSameRank = (currentSize >=4 && std::all_of(current.begin(), current.end(),
-                                                                [&](const Card& c){ return c.getRank() == current[0].getRank(); }));
-        bool lastSameRank = (lastSize >=4 && std::all_of(last.begin(), last.end(),
-                                                          [&](const Card& c){ return c.getRank() == last[0].getRank(); }));
-
-        if (currentSameRank && !lastSameRank) return true;
-        if (!currentSameRank && lastSameRank) return false;
-
-        // 同类型炸弹：比点数（取第一张牌的rank值）
-        return current[0].getRankInt() > last[0].getRankInt();
-    }
-    // 4. 非炸弹：必须牌型相同、张数相同，且点数更大
-    if (current.size() != last.size()) return false;
-
-    // 单张/对子/三张：比点数（取第一张牌的rank值，默认同牌型）
-    if (current.size() == 1 || current.size() == 2 || current.size() == 3) {
-        return current[0].getRankInt() > last[0].getRankInt();
+    if (currentInfo.type == PlayType::Invalid || lastInfo.type == PlayType::Invalid) {
+        return false;
     }
 
-    // 5. 复杂牌型（三带一、三带二、顺子等）：简化处理（可根据需求扩展）
-    // 这里仅实现基础逻辑，实际需补充完整牌型匹配
-    return false;
+    // 王炸优先级最高
+    if (lastInfo.type == PlayType::Rocket) return false;
+    if (currentInfo.type == PlayType::Rocket) return true;
+
+    // 炸弹处理（非王炸）
+    if (lastInfo.type == PlayType::Bomb && currentInfo.type != PlayType::Bomb) return false;
+    if (currentInfo.type == PlayType::Bomb && lastInfo.type != PlayType::Bomb) return true;
+
+    if (currentInfo.type != lastInfo.type) return false;
+
+    // 同牌型比较大小
+    switch (currentInfo.type) {
+    case PlayType::Single:
+    case PlayType::Pair:
+    case PlayType::Trips:
+    case PlayType::TripsWithSingle:
+    case PlayType::TripsWithPair:
+    case PlayType::StraightFive:
+        return currentInfo.size == lastInfo.size && currentInfo.primaryRank > lastInfo.primaryRank;
+    case PlayType::Bomb:
+        if (currentInfo.size != lastInfo.size) return currentInfo.size > lastInfo.size;
+        return currentInfo.primaryRank > lastInfo.primaryRank;
+    case PlayType::Rocket:
+    case PlayType::Invalid:
+    default:
+        return false;
+    }
 }
 
 
@@ -196,84 +289,8 @@ Judge::Judge(QObject *parent)
 
 
 bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
-    if (playCards.empty()) return false;
-
-    int cardCount = playCards.size();
-
-    // 1. 单张
-    if (cardCount == 1) return true;
-
-    // 2. 对子
-    if (cardCount == 2) {
-        if (isRocket(playCards)) return true;
-        return playCards[0].getRank() == playCards[1].getRank();
-    }
-
-    // 4. 三张（3张同点数）
-    if (cardCount == 3) {
-        return playCards[0].getRank() == playCards[1].getRank()
-        && playCards[1].getRank() == playCards[2].getRank();
-    }
-
-    // 5. 三带一（3张同点数 + 1张任意）
-    if (cardCount == 4) {
-        std::map<std::string, int> rankCount;
-        for (const auto& c : playCards) {
-            rankCount[c.getRankString()]++;
-        }
-        // 必须有一个rank出现3次，另一个出现1次（否则继续检查是否是炸弹）
-        if ((rankCount.size() == 2) &&
-            (rankCount.begin()->second == 3 || rankCount.begin()->second == 1)) {
-            return true;
-        }
-    }
-
-    // 6. 三带二（3张同点数 + 2张同点数）
-    if (cardCount == 5) {
-        std::map<std::string, int> rankCount;
-        for (const auto& c : playCards) {
-            rankCount[c.getRankString()]++;
-        }
-        // 必须有一个rank出现3次，另一个出现2次
-        if (rankCount.size() == 2) {
-            auto it = rankCount.begin();
-            int cnt1 = it->second;
-            int cnt2 = (++it)->second;
-            if ((cnt1 == 3 && cnt2 == 2) || (cnt1 == 2 && cnt2 == 3)) {
-                return true;
-            }
-        }
-
-        // 顺子（5张连续点数，不包含2和王）
-        bool isStraight = true;
-        std::vector<Rank> ranks;
-        for (const auto& c : playCards) {
-            Rank val = c.getRank();
-            // 顺子不能包含2、小王、大王
-            if (val == Rank::Two || val >= Rank::S) {
-                isStraight = false;
-                break;
-            }
-            ranks.push_back(val);
-        }
-        if (isStraight) {
-            std::sort(ranks.begin(), ranks.end());
-            // 检查连续
-            for (int i = 1; i < 5; i++) {
-                if (static_cast<int>(ranks[i]) != static_cast<int>(ranks[i-1]) + 1) {
-                    isStraight = false;
-                    break;
-                }
-            }
-        }
-        if (isStraight) return true;
-    }
-
-    // 8. 炸弹（4张及以上同点数、同花顺、四王）
-    if (isBomb(playCards)) return true;
-
-    // 其他牌型（如连对、钢板等）可根据需求扩展
-    return false;
+    PlayInfo info = analyzePlay(playCards);
+    return info.type != PlayType::Invalid;
 }
 bool Judge::playHumanCard(const std::vector<Card>& playCards) {
     if (finishOrder.size()==4) return false;

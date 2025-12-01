@@ -448,7 +448,27 @@ void MainWindow::onSelectionChanged() {
 
 void MainWindow::onPlayClicked() {
     if (!humanPlayer || !judge) return;
+
+    // 如果当前并非人类玩家回合，直接提示，避免错误的“规则不符”警告
+    if (judge->getCurrentTurn() != 0) {
+        QMessageBox::information(this, "提示", "现在还没轮到你出牌");
+        return;
+    }
     auto cards = humanPlayer->getSelectedCards();
+
+    // 如果玩家界面的选中状态丢失，兜底读取 QListWidget 的 UserRole 标记
+    if (cards.empty()) {
+        std::vector<Card> fallbackSelection;
+        std::vector<Card> humanHand = humanPlayer->getHandCopy();
+        for (int i = 0; i < listHuman->count() && i < static_cast<int>(humanHand.size()); ++i) {
+            QListWidgetItem* item = listHuman->item(i);
+            if (item && item->data(Qt::UserRole).toBool()) {
+                fallbackSelection.push_back(humanHand[i]);
+            }
+        }
+        cards = fallbackSelection;
+    }
+
     if (cards.empty()) {
         QMessageBox::information(this, "提示", "请先选择要出的牌");
         return;
@@ -476,13 +496,16 @@ void MainWindow::onPassClicked() {
 
 void MainWindow::updateUI() {
     if (!humanPlayer || !judge) return;
-
+    bool isHumanTurn = (judge->getCurrentTurn() == 0);
+    btnPlay->setEnabled(isHumanTurn);
+    btnPass->setEnabled(isHumanTurn);
     // 1. 刷新人类手牌（保持不变，但确保用新的 Delegate）
     listHuman->clear();
     std::vector<Card> humanHand = humanPlayer->getHandCopy();
     for (const auto& card : humanHand) {
         QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(card.toString()));
-        item->setData(Qt::UserRole, false); // 初始化选中状态
+        bool selected = humanPlayer->isCardSelected(card);
+        item->setData(Qt::UserRole, selected); // 初始化选中状态
         listHuman->addItem(item);
     }
 
