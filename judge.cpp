@@ -28,6 +28,20 @@ int Judge::getTeamLevel(int teamId) const {
     if (teamId < 0 || teamId >= static_cast<int>(teamLevels.size())) return 0;
     return teamLevels[teamId];
 }
+
+int Judge::getCurrentLevelTeam() const {
+    if (!previousPlacements.empty()) {
+        return previousPlacements.front() % 2;
+    }
+    // 初局或尚未产生上局排名时，以当前更高等级的一队作为级牌队伍
+    return (teamLevels[1] > teamLevels[0]) ? 1 : 0;
+}
+
+int Judge::getCurrentLevelRank() const {
+    int team = getCurrentLevelTeam();
+    if (team < 0 || team >= static_cast<int>(teamLevels.size())) return 0;
+    return teamLevels[team];
+}
 void Judge::setPlayers(const std::vector<Player*>& newPlayers) {
     players.clear();
     players.assign(newPlayers.begin(), newPlayers.end());
@@ -46,8 +60,8 @@ void Judge::resetForNewHand() {
         playerLastPlays.assign(players.size(), {});
         playerPassedRound.assign(players.size(), false);
     }
-    // 默认逆时针
-    direction = -1;
+    // 默认逆时针，玩家顺序：0 -> 1 -> 2 -> 3
+    direction = 1;
     currentTurn = 0;
 }
 void Judge::setCurrentTurn(int turn) {

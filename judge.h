@@ -33,6 +33,8 @@ public:
     std::vector<Card> getPlayerLastPlay(int playerId) const;
     bool hasPlayerPassed(int playerId) const;
     int getTeamLevel(int teamId) const;
+    int getCurrentLevelTeam() const;
+    int getCurrentLevelRank() const;
     std::vector<int> getPreviousPlacements() const;
     std::vector<std::vector<Card>> playerLastPlays;
 
@@ -55,7 +57,8 @@ signals:
     void playerReported(int playerId, int remainCards);
 private:
     int currentTurn;
-    int direction{-1};
+    // 出牌方向：1 表示逆时针（0 -> 1 -> 2 -> 3），-1 表示顺时针
+    int direction{1};
     std::array<int,2> teamLevels{2,2};
     std::vector<int> finishOrder;
     int lastPlayer;

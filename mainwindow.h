@@ -44,6 +44,8 @@ private:
     QListWidget *playCenterBottom; // 中央下：显示 Human 的出牌（位于人类手牌上方）
     QLabel *lblLastPlay;
     QLabel *lblStatus;
+    QLabel *lblLevels;
+    QLabel *lblLevelCard;
     QLabel *lblSelection;
     QPushButton *btnPass;
     QPushButton *btnNewGame;
