@@ -4,14 +4,52 @@
 #include <algorithm>
 #include <iostream>
 #include <map>
+#include <set>
 #include "card.h"
 #include "player.h"
 #include "AIPlayer.h"
-// 辅助：定义牌面值映射（方便比较大小，掼蛋规则：2 < 3 < ... < 10 < J < Q < K < A < 小王 < 大王）
-enum class CardRankValue {
-    TWO = 2, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, TEN,
-    J, Q, K, A, JOKER_SMALL, JOKER_BIG
-};
+// 级牌、红桃级牌相关辅助：掼蛋顺序 2 < 3 < ... < A < 级牌 < 小王 < 大王
+static int logicalRank(const Card& c) {
+    switch (c.getRank()) {
+    case Rank::Two:   return 2;
+    case Rank::Three: return 3;
+    case Rank::Four:  return 4;
+    case Rank::Five:  return 5;
+    case Rank::Six:   return 6;
+    case Rank::Seven: return 7;
+    case Rank::Eight: return 8;
+    case Rank::Nine:  return 9;
+    case Rank::Ten:   return 10;
+    case Rank::Jack:  return 11;
+    case Rank::Queen: return 12;
+    case Rank::King:  return 13;
+    case Rank::Ace:   return 14;
+    case Rank::S:     return 15; // 小王
+    case Rank::B:     return 16; // 大王
+    default: return 0;
+    }
+}
+
+static bool isLevelCard(const Card& c, int levelRank) {
+    return logicalRank(c) == levelRank;
+}
+
+static bool isHeartLevelWildcard(const Card& c, int levelRank) {
+    return c.getSuit() == Suit::Hearts && isLevelCard(c, levelRank);
+}
+
+// 返回当前牌在掼蛋比较中的权重，级牌被放置在 A 与小王之间
+static int orderValue(int rankValue, int levelRank) {
+    std::vector<int> order = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+    order.erase(std::remove(order.begin(), order.end(), levelRank), order.end());
+    order.push_back(levelRank); // 级牌介于 A 和小王之间
+    order.push_back(15);        // 小王
+    order.push_back(16);        // 大王
+
+    auto it = std::find(order.begin(), order.end(), rankValue);
+    if (it == order.end()) return 0;
+    return static_cast<int>((it - order.begin()) + 1);
+}
 
 int Judge::getPlayerHandCount(int playerId) const {
     if (playerId < 0 || playerId >= static_cast<int>(players.size())) return 0;
@@ -145,7 +183,7 @@ static bool isBomb(const std::vector<Card>& cards) {
         // 检查连续rank
         std::vector<int> ranks;
         for (const auto& c : cards) {
-            ranks.push_back(c.getRankInt());
+            ranks.push_back(logicalRank(c));
         }
         std::sort(ranks.begin(), ranks.end());
         bool consecutive = true;
@@ -165,97 +203,254 @@ enum class PlayType {
     Single,
     Pair,
     Trips,
-    TripsWithSingle,
     TripsWithPair,
-    StraightFive,
+    Straight,
+    TriplePairs,
+    SteelPlate,
+    StraightFlush,
     Bomb,
-    Rocket
+    TianWang
 };
 
 struct PlayInfo {
     PlayType type{PlayType::Invalid};
     int primaryRank{0};
     int size{0};
+    bool isStraightFlush{false};
 };
 
-static PlayInfo analyzePlay(const std::vector<Card>& cards) {
+static PlayInfo analyzePlay(const std::vector<Card>& cards, int levelRank) {
     PlayInfo info;
     info.size = static_cast<int>(cards.size());
     if (cards.empty()) return info;
 
-    // 事先对 rank 做一次统计，便于后续复用
+    // 预处理：统计非红桃级牌的数量，红桃级牌作为通配符使用
     std::map<int, int> rankCount;
+    int heartLevelWild = 0;
     for (const auto& c : cards) {
-        rankCount[c.getRankInt()]++;
+        if (isHeartLevelWildcard(c, levelRank)) {
+            ++heartLevelWild;
+            continue;
+        }
+        rankCount[logicalRank(c)]++;
     }
 
-    if (isRocket(cards)) {
-        info.type = PlayType::Rocket;
-        return info;
+    // 天王炸：2张大王 + 2张小王
+    if (cards.size() == 4) {
+        int smallJ = 0, bigJ = 0;
+        for (const auto& c : cards) {
+            if (c.getRank() == Rank::S) smallJ++;
+            else if (c.getRank() == Rank::B) bigJ++;
+        }
+        if (smallJ == 2 && bigJ == 2) {
+            info.type = PlayType::TianWang;
+            info.primaryRank = orderValue(16, levelRank);
+            return info;
+        }
     }
-    if (isBomb(cards)) {
-        info.type = PlayType::Bomb;
-        info.primaryRank = cards[0].getRankInt();
-        return info;
+
+    // 炸弹：4 张及以上相同点数（红桃级牌可补齐，不能替换大小王）
+    if (cards.size() >= 4 && rankCount.size() <= 1) {
+        int targetRank = rankCount.empty() ? levelRank : rankCount.begin()->first;
+        int available = (rankCount.empty() ? 0 : rankCount.begin()->second) + heartLevelWild;
+        bool hasOnlyAllowed = true;
+        if (!rankCount.empty()) {
+            for (const auto& kv : rankCount) {
+                if (kv.first != targetRank) { hasOnlyAllowed = false; break; }
+            }
+        }
+        if (hasOnlyAllowed && available == static_cast<int>(cards.size()) && targetRank < 15) {
+            info.type = PlayType::Bomb;
+            info.primaryRank = orderValue(targetRank, levelRank);
+            info.size = static_cast<int>(cards.size());
+            return info;
+        }
+    }
+
+    auto isAllSameSuit = [&](Suit target) {
+        for (const auto& c : cards) {
+            if (isHeartLevelWildcard(c, levelRank)) continue; // 通配符可视作任意花色
+            if (c.getSuit() != target) return false;
+        }
+        return true;
+    };
+
+    // 同花顺炸弹：必须 5 张，同花且顺子，红桃级牌可补 rank 或花色
+    if (cards.size() == 5) {
+        for (auto candidateSuit : {Suit::Spades, Suit::Clubs, Suit::Diamonds, Suit::Hearts}) {
+            if (!isAllSameSuit(candidateSuit)) continue;
+
+            std::vector<int> existingRanks;
+            for (const auto& c : cards) {
+                if (isHeartLevelWildcard(c, levelRank)) continue;
+                int r = logicalRank(c);
+                if (r >= 15) { existingRanks.clear(); break; }
+                existingRanks.push_back(r);
+            }
+            if (existingRanks.empty() && heartLevelWild == 0) continue;
+            std::sort(existingRanks.begin(), existingRanks.end());
+            existingRanks.erase(std::unique(existingRanks.begin(), existingRanks.end()), existingRanks.end());
+            auto fitsStraight = [&](int startRank) {
+                std::vector<int> need;
+                for (int i = 0; i < 5; ++i) need.push_back(startRank + i);
+                std::set<int> needSet(need.begin(), need.end());
+                for (int r : existingRanks) {
+                    if (needSet.count(r) == 0) return false;
+                    needSet.erase(r);
+                }
+                return static_cast<int>(needSet.size()) <= heartLevelWild;
+            };
+            for (int start = 3; start <= 10; ++start) { // 3..A
+                if (fitsStraight(start)) {
+                    info.type = PlayType::StraightFlush;
+                    info.primaryRank = orderValue(start + 4, levelRank);
+                    info.isStraightFlush = true;
+                    return info;
+                }
+            }
+        }
     }
 
     if (cards.size() == 1) {
+        int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
         info.type = PlayType::Single;
-        info.primaryRank = cards[0].getRankInt();
+        info.primaryRank = orderValue(rankV, levelRank);
         return info;
     }
 
-    if (cards.size() == 2 && rankCount.size() == 1) {
-        info.type = PlayType::Pair;
-        info.primaryRank = rankCount.begin()->first;
-        return info;
-    }
-
-    if (cards.size() == 3 && rankCount.size() == 1) {
-        info.type = PlayType::Trips;
-        info.primaryRank = rankCount.begin()->first;
-        return info;
-    }
-
-    if (cards.size() == 4) {
-        for (const auto& kv : rankCount) {
-            if (kv.second == 3) {
-                info.type = PlayType::TripsWithSingle;
-                info.primaryRank = kv.first;
-                return info;
-            }
+    if (cards.size() == 2 && rankCount.size() <= 1) {
+        int count = rankCount.empty() ? 0 : rankCount.begin()->second;
+        if (count + heartLevelWild == 2) {
+            int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
+            info.type = PlayType::Pair;
+            info.primaryRank = orderValue(rankV, levelRank);
+            return info;
         }
     }
 
-    if (cards.size() == 5) {
-        for (const auto& kv : rankCount) {
-            if (kv.second == 3) {
-                // 三带二
+    if (cards.size() == 3 && rankCount.size() <= 1) {
+        int count = rankCount.empty() ? 0 : rankCount.begin()->second;
+        if (count + heartLevelWild == 3) {
+            int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
+            info.type = PlayType::Trips;
+            info.primaryRank = orderValue(rankV, levelRank);
+            return info;
+        }
+    }
+
+    // 三带二
+    if (cards.size() == 5 && rankCount.size() <= 2) {
+        std::vector<int> candidateTripRanks;
+        for (const auto& kv : rankCount) candidateTripRanks.push_back(kv.first);
+        if (std::find(candidateTripRanks.begin(), candidateTripRanks.end(), levelRank) == candidateTripRanks.end()) {
+            candidateTripRanks.push_back(levelRank);
+        }
+        for (int tripRank : candidateTripRanks) {
+            int tripCount = rankCount.count(tripRank) ? rankCount.at(tripRank) : 0;
+            int wildLeft = heartLevelWild - std::max(0, 3 - tripCount);
+            if (wildLeft < 0) continue;
+
+            // 余下牌必须组成对子
+            std::map<int, int> rest = rankCount;
+            rest.erase(tripRank);
+            if (rest.size() > 1) continue;
+            int pairRank = rest.empty() ? levelRank : rest.begin()->first;
+            if (pairRank == tripRank) continue;
+            int pairCount = rest.empty() ? 0 : rest.begin()->second;
+            if (pairCount > 2) continue;
+            if (pairCount + wildLeft == 2) {
                 info.type = PlayType::TripsWithPair;
-                info.primaryRank = kv.first;
+                info.primaryRank = orderValue(tripRank, levelRank);
                 return info;
             }
         }
+    }
 
-        // 顺子（5 张，且不含 2 和大小王）
-        bool invalidRank = std::any_of(cards.begin(), cards.end(), [](const Card& c) {
-            return c.getRank() == Rank::Two || c.getRank() == Rank::S || c.getRank() == Rank::B;
-        });
+    // 三连对（3 组点数相邻的对子），红桃级牌可补齐对子
+    if (cards.size() == 6 && rankCount.size() <= 3) {
+        for (int start = 3; start <= 12; ++start) { // 最多到 Q 作为起点
+            std::vector<int> need = {start, start + 1, start + 2};
+            int wildLeft = heartLevelWild;
+            bool ok = true;
+            for (int r : need) {
+                int cnt = rankCount.count(r) ? rankCount.at(r) : 0;
+                if (cnt > 2) { ok = false; break; }
+                if (cnt < 2) wildLeft -= (2 - cnt);
+                if (wildLeft < 0) { ok = false; break; }
+            }
+            if (!ok) continue;
+            // 确保没有其他无关 rank
+            int used = 0;
+            for (int r : need) used += rankCount.count(r) ? rankCount.at(r) : 0;
+            int extra = 0;
+            for (const auto& kv : rankCount) {
+                if (std::find(need.begin(), need.end(), kv.first) == need.end()) extra += kv.second;
+            }
+            if (used + extra != static_cast<int>(cards.size() - heartLevelWild)) continue;
+            if (extra == 0) {
+                info.type = PlayType::TriplePairs;
+                info.primaryRank = orderValue(start + 2, levelRank);
+                return info;
+            }
+        }
+    }
+
+    // 钢板：2 组相邻的三张牌，红桃级牌可补齐三张
+    if (cards.size() == 6 && rankCount.size() <= 2) {
+        for (int start = 3; start <= 13; ++start) { // 到 K 作为起点
+            std::vector<int> need = {start, start + 1};
+            int wildLeft = heartLevelWild;
+            bool ok = true;
+            for (int r : need) {
+                int cnt = rankCount.count(r) ? rankCount.at(r) : 0;
+                if (cnt > 3) { ok = false; break; }
+                if (cnt < 3) wildLeft -= (3 - cnt);
+                if (wildLeft < 0) { ok = false; break; }
+            }
+            if (!ok) continue;
+            int used = 0;
+            for (int r : need) used += rankCount.count(r) ? rankCount.at(r) : 0;
+            int extra = 0;
+            for (const auto& kv : rankCount) {
+                if (std::find(need.begin(), need.end(), kv.first) == need.end()) extra += kv.second;
+            }
+            if (used + extra != static_cast<int>(cards.size() - heartLevelWild)) continue;
+            if (extra == 0) {
+                info.type = PlayType::SteelPlate;
+                info.primaryRank = orderValue(start + 1, levelRank);
+                return info;
+            }
+        }
+    }
+
+    // 顺子（5 张，且不含 2 和大小王，A 只能在开头/结尾），红桃级牌可补齐缺牌
+    if (cards.size() == 5) {
+        auto containsInvalid = [&](const Card& c){ return c.getRank() == Rank::Two || c.getRank() == Rank::S || c.getRank() == Rank::B; };
+        bool invalidRank = std::any_of(cards.begin(), cards.end(), containsInvalid);
         if (!invalidRank) {
             std::vector<int> ranks;
-            for (const auto& c : cards) ranks.push_back(c.getRankInt());
-            std::sort(ranks.begin(), ranks.end());
-            bool consecutive = true;
-            for (int i = 1; i < 5; ++i) {
-                if (ranks[i] != ranks[i - 1] + 1) {
-                    consecutive = false;
-                    break;
-                }
+            for (const auto& c : cards) {
+                if (isHeartLevelWildcard(c, levelRank)) continue;
+                ranks.push_back(logicalRank(c));
             }
-            if (consecutive) {
-                info.type = PlayType::StraightFive;
-                info.primaryRank = ranks.back();
-                return info;
+            std::sort(ranks.begin(), ranks.end());
+            ranks.erase(std::unique(ranks.begin(), ranks.end()), ranks.end());
+            auto fitsStraight = [&](int startRank) {
+                std::vector<int> need;
+                for (int i = 0; i < 5; ++i) need.push_back(startRank + i);
+                std::set<int> needSet(need.begin(), need.end());
+                for (int r : ranks) {
+                    if (needSet.count(r) == 0) return false;
+                    needSet.erase(r);
+                }
+                return static_cast<int>(needSet.size()) <= heartLevelWild;
+            };
+            for (int start = 3; start <= 10; ++start) { // 3..A
+                if (fitsStraight(start)) {
+                    info.type = PlayType::Straight;
+                    info.primaryRank = orderValue(start + 4, levelRank);
+                    return info;
+                }
             }
         }
     }
@@ -263,23 +458,48 @@ static PlayInfo analyzePlay(const std::vector<Card>& cards) {
     return info;
 }
 
-static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& last) {
+static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& last, int levelRank) {
     if (last.empty()) return true;
 
-    PlayInfo currentInfo = analyzePlay(current);
-    PlayInfo lastInfo = analyzePlay(last);
+    PlayInfo currentInfo = analyzePlay(current, levelRank);
+    PlayInfo lastInfo = analyzePlay(last, levelRank);
 
     if (currentInfo.type == PlayType::Invalid || lastInfo.type == PlayType::Invalid) {
         return false;
     }
 
-    // 王炸优先级最高
-    if (lastInfo.type == PlayType::Rocket) return false;
-    if (currentInfo.type == PlayType::Rocket) return true;
+    // 天王炸最高
+    if (lastInfo.type == PlayType::TianWang) return false;
+    if (currentInfo.type == PlayType::TianWang) return true;
 
-    // 炸弹处理（非王炸）
-    if (lastInfo.type == PlayType::Bomb && currentInfo.type != PlayType::Bomb) return false;
-    if (currentInfo.type == PlayType::Bomb && lastInfo.type != PlayType::Bomb) return true;
+    // 炸弹体系处理
+    auto bombPriority = [](const PlayInfo& info) {
+        if (info.type == PlayType::TianWang) return 5;
+        if (info.type == PlayType::Bomb && info.size >= 6) return 4;
+        if (info.type == PlayType::StraightFlush) return 3;
+        if (info.type == PlayType::Bomb && info.size == 5) return 2;
+        if (info.type == PlayType::Bomb) return 1;
+        return 0;
+    };
+
+    int lastBomb = bombPriority(lastInfo);
+    int curBomb  = bombPriority(currentInfo);
+
+    if (lastBomb > 0 || curBomb > 0) {
+        if (curBomb == 0) return false; // 非炸弹无法压炸弹
+        if (curBomb != lastBomb) return curBomb > lastBomb;
+
+        // 同类炸弹比大小
+        if (currentInfo.type == PlayType::Bomb && lastInfo.type == PlayType::Bomb) {
+            if (currentInfo.size != lastInfo.size) return currentInfo.size > lastInfo.size;
+            return currentInfo.primaryRank > lastInfo.primaryRank;
+        }
+        if (currentInfo.type == PlayType::StraightFlush && lastInfo.type == PlayType::StraightFlush) {
+            return currentInfo.primaryRank > lastInfo.primaryRank;
+        }
+        // 不应该走到这里
+        return false;
+    }
 
     if (currentInfo.type != lastInfo.type) return false;
 
@@ -288,15 +508,11 @@ static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& l
     case PlayType::Single:
     case PlayType::Pair:
     case PlayType::Trips:
-    case PlayType::TripsWithSingle:
     case PlayType::TripsWithPair:
-    case PlayType::StraightFive:
+    case PlayType::Straight:
+    case PlayType::TriplePairs:
+    case PlayType::SteelPlate:
         return currentInfo.size == lastInfo.size && currentInfo.primaryRank > lastInfo.primaryRank;
-    case PlayType::Bomb:
-        if (currentInfo.size != lastInfo.size) return currentInfo.size > lastInfo.size;
-        return currentInfo.primaryRank > lastInfo.primaryRank;
-    case PlayType::Rocket:
-    case PlayType::Invalid:
     default:
         return false;
     }
@@ -323,7 +539,7 @@ Judge::Judge(QObject *parent)
 
 
 bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
-    PlayInfo info = analyzePlay(playCards);
+    PlayInfo info = analyzePlay(playCards, getCurrentLevelRank());
     return info.type != PlayType::Invalid;
 }
 int Judge::teammateOf(int playerId) const {
@@ -348,7 +564,7 @@ bool Judge::playHumanCard(const std::vector<Card>& playCards) {
 
     bool valid = isValidPlay(playCards);
     if (valid && !lastCards.empty()) {
-        valid = canBeat(playCards, lastCards);
+        valid = canBeat(playCards, lastCards, getCurrentLevelRank());
     }
 
     if (!valid) {
@@ -394,7 +610,7 @@ void Judge::playAICards(int aiId, const std::vector<Card>& aiChosen)
     }
 
     // 2. AI 出牌逻辑
-    if (!lastCards.empty() && !canBeat(aiChosen, lastCards)) {
+    if (!lastCards.empty() && !canBeat(aiChosen, lastCards, getCurrentLevelRank())) {
         // 容错：如果AI算错了，强制Pass
         playerPassedRound[aiId] = true;
         playerLastPlays[aiId].clear();
@@ -620,13 +836,16 @@ void Judge::finalizeGame() {
 Card Judge::pickTributeCard(Player* donor) const {
     Card best;
     auto hand = donor->getHandCopy();
-    std::sort(hand.begin(), hand.end(), [](const Card& a, const Card& b){
-        if (a.getRankInt() != b.getRankInt()) return a.getRankInt() > b.getRankInt();
+    int levelRank = getCurrentLevelRank();
+    std::sort(hand.begin(), hand.end(), [levelRank](const Card& a, const Card& b){
+        int av = orderValue(logicalRank(a), levelRank);
+        int bv = orderValue(logicalRank(b), levelRank);
+        if (av != bv) return av > bv;
         return static_cast<int>(a.getSuit()) > static_cast<int>(b.getSuit());
     });
     int forbiddenRank = teamLevels[donor->getID() % 2];
     for (const auto& c : hand) {
-        if (c.getSuit() == Suit::Hearts && c.getRankInt() == forbiddenRank) {
+        if (c.getSuit() == Suit::Hearts && logicalRank(c) == forbiddenRank) {
             continue;
         }
         best = c;
@@ -638,12 +857,15 @@ Card Judge::pickTributeCard(Player* donor) const {
 Card Judge::pickReturnCard(Player* winner) const {
     Card chosen;
     auto hand = winner->getHandCopy();
-    std::sort(hand.begin(), hand.end(), [](const Card& a, const Card& b){
-        if (a.getRankInt() != b.getRankInt()) return a.getRankInt() < b.getRankInt();
+    int levelRank = getCurrentLevelRank();
+    std::sort(hand.begin(), hand.end(), [levelRank](const Card& a, const Card& b){
+        int av = orderValue(logicalRank(a), levelRank);
+        int bv = orderValue(logicalRank(b), levelRank);
+        if (av != bv) return av < bv;
         return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
     });
     for (const auto& c : hand) {
-        if (c.getRankInt() <= 10) { chosen = c; break; }
+        if (logicalRank(c) <= 10) { chosen = c; break; }
     }
     return chosen;
 }
@@ -678,7 +900,7 @@ void Judge::applyTributeAndReturn() {
         qInfo() << "玩家" << loser << "向" << winner << "进贡" << QString::fromStdString(tribute.toString());
     }
     Card back = pickReturnCard(players[winner]);
-    if (back.getRankInt() > 0 && players[winner]->playCards({back})) {
+    if (logicalRank(back) > 0 && players[winner]->playCards({back})) {
         players[loser]->addCards({back});
         qInfo() << "玩家" << winner << "还牌" << QString::fromStdString(back.toString());
     }
