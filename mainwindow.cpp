@@ -150,6 +150,8 @@ void MainWindow::setupUI()
     listHuman = new QListWidget;
     lblLastPlay = new QLabel("上家出牌：无");
     lblStatus = new QLabel("游戏状态：等待开始");
+    lblLevels = new QLabel("队伍等级：-- / --");
+    lblLevelCard = new QLabel("本局级牌：待定");
     lblSelection = new QLabel("已选中：0 张 (无)");
     btnNewGame = new QPushButton("新游戏");
     btnPlay = new QPushButton("出牌");
@@ -164,9 +166,9 @@ void MainWindow::setupUI()
     listHuman->setSelectionMode(QAbstractItemView::NoSelection);
 
     // --- 中央出牌区（四个面板） ---
-    playTop = new QListWidget;         // 对应 AI1
-    playLeft = new QListWidget;        // 对应 AI2
-    playRight = new QListWidget;       // 对应 AI3
+    playTop = new QListWidget;         // 对应玩家 2（队友）
+    playLeft = new QListWidget;        // 对应玩家 3（左手边）
+    playRight = new QListWidget;       // 对应玩家 1（右手边）
     playCenterBottom = new QListWidget;// 对应 Human 的桌面出牌（位于 human 手牌之上）
 
     auto makePlayWidgetDefault = [](QListWidget* w){
@@ -206,26 +208,28 @@ void MainWindow::setupUI()
     };
     // --- 布局：我们做一个 3x3 风格的中间区域（Top / Left / Center / Right / Bottom） ---
     QVBoxLayout *mainLay = new QVBoxLayout;
-    // Top row: AI1 label + playTop (centered)
+    // Top row: player2 label + playTop (centered)
     QHBoxLayout *rowTop = new QHBoxLayout;
     rowTop->addStretch();
-    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 1", playTop);
+    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 2", playTop);
     rowTop->addLayout(topBox);
     rowTop->addStretch(); // 保持居中
     // Middle row: left play, center info, right play
     QHBoxLayout *rowMiddle = new QHBoxLayout;
-    // left column (AI2)
-    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 2", playLeft);
+    // left column (player3)
+    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 3", playLeft);
     rowMiddle->addLayout(leftBox);
 
     // center column: can show game status / last plays overall
     QVBoxLayout *centerBox = new QVBoxLayout;
     centerBox->addWidget(lblLastPlay, 0, Qt::AlignCenter);
     centerBox->addWidget(lblStatus, 0, Qt::AlignCenter);
+    centerBox->addWidget(lblLevels, 0, Qt::AlignCenter);
+    centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
     rowMiddle->addLayout(centerBox, 1); // give center more stretch
 
-    // right column (AI3)
-    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 3", playRight);
+    // right column (player1)
+    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 1", playRight);
     rowMiddle->addLayout(rightBox);
     // Bottom row: human play area above human hand
     QHBoxLayout *rowBottom = new QHBoxLayout;
@@ -504,6 +508,16 @@ void MainWindow::updateUI() {
     bool isHumanTurn = (judge->getCurrentTurn() == 0);
     btnPlay->setEnabled(isHumanTurn);
     btnPass->setEnabled(isHumanTurn);
+    auto rankToString = [](int rank) -> QString {
+        switch (rank) {
+        case 11: return "J";
+        case 12: return "Q";
+        case 13: return "K";
+        case 14: return "A";
+        case 15: return "2";
+        default: return QString::number(rank);
+        }
+    };
     // 1. 刷新人类手牌（保持不变，但确保用新的 Delegate）
     listHuman->clear();
     std::vector<Card> humanHand = humanPlayer->getHandCopy();
@@ -546,15 +560,29 @@ void MainWindow::updateUI() {
     };
 
     updateTableArea(0, playCenterBottom);
-    updateTableArea(1, playTop);
-    updateTableArea(2, playLeft);
-    updateTableArea(3, playRight);
+    updateTableArea(1, playRight);
+    updateTableArea(2, playTop);
+    updateTableArea(3, playLeft);
 
     // 4. 更新状态文字
     if (judge->getCurrentTurn() == 0) {
         lblStatus->setText("轮到你了：请出牌");
     } else {
         lblStatus->setText(QString("等待玩家 %1 出牌...").arg(judge->getCurrentTurn()));
+    }
+
+    // 显示双方等级与本局级牌
+    if (lblLevels) {
+        lblLevels->setText(QString("队伍0 等级：%1 | 队伍1 等级：%2")
+                               .arg(judge->getTeamLevel(0))
+                               .arg(judge->getTeamLevel(1)));
+    }
+    if (lblLevelCard) {
+        int levelRank = judge->getCurrentLevelRank();
+        QString rankText = levelRank > 0 ? rankToString(levelRank) : QStringLiteral("--");
+        lblLevelCard->setText(QString("本局级牌：♥%1（队伍%2）")
+                                  .arg(rankText)
+                                  .arg(judge->getCurrentLevelTeam()));
     }
 
     // 5. 按钮控制
@@ -609,5 +637,18 @@ void MainWindow::onGameFinished() {
     msg += QString("\n队伍0 等级：%1\n队伍1 等级：%2")
                .arg(judge->getTeamLevel(0))
                .arg(judge->getTeamLevel(1));
+    auto rankToString = [](int rank) -> QString {
+        switch (rank) {
+        case 11: return "J";
+        case 12: return "Q";
+        case 13: return "K";
+        case 14: return "A";
+        case 15: return "2";
+        default: return QString::number(rank);
+        }
+    };
+    msg += QString("\n本局级牌：♥%1（队伍%2）")
+               .arg(rankToString(judge->getCurrentLevelRank()))
+               .arg(judge->getCurrentLevelTeam());
     QMessageBox::information(this, "游戏结束", msg);
 }
