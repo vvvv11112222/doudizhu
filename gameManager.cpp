@@ -44,7 +44,7 @@ void GameManager::startGame() {
     for (auto& player : players_) {
         player->clearHand(); // 假设你有一个 clearHand() 方法
     }
-
+     judge_->resetForNewHand();
     // 1. 构建并洗牌（快速操作）
     deck_.buildDeck();
     deck_.shuffleDeck();
@@ -57,7 +57,7 @@ void GameManager::startGame() {
         players_[i]->setHand(stdHand);
         emit playerDealt(i);
     }
-
+    judge_->applyTributeAndReturn();
     emit gameStarted();
 
     initTurnQueue();

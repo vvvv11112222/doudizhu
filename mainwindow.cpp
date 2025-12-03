@@ -409,7 +409,9 @@ void MainWindow::setupConnections() {
     connect(judge, &Judge::turnChanged, this, &MainWindow::updateUI);
     // 连接清台信号
     connect(judge, &Judge::tableCleared, this, &MainWindow::updateUI);
-
+    connect(judge, &Judge::playerReported, this, [this](int playerId, int remain){
+        lblStatus->setText(QString("玩家 %1 报牌：剩余 %2 张").arg(playerId).arg(remain));
+    });
     // 确保其他信号也连接了
     connect(judge, &Judge::lastPlayUpdated, this, &MainWindow::updateUI); // 这里不再需要 lambda 参数，全量刷新虽然浪费一点但逻辑最稳
     connect(judge, &Judge::turnChanged, this, &MainWindow::updateUI);
@@ -492,7 +494,7 @@ void MainWindow::onPlayClicked() {
 void MainWindow::onPassClicked() {
     if (judge) {
         lblStatus->setText("你选择了过");
-        judge->nextTurn();
+        judge->humanPass();
         updateUI();
     }
 }
@@ -593,6 +595,19 @@ void MainWindow::refreshSelectionSummary() {
                               .arg(detail));
 }
 void MainWindow::onGameFinished() {
-    QString msg = "over";
+    QString msg;
+    auto placements = judge->getPreviousPlacements();
+    if (!placements.empty()) {
+        QStringList order;
+        for (int pos = 0; pos < placements.size(); ++pos) {
+            order << QString("第%1名：玩家%2").arg(pos + 1).arg(placements[pos]);
+        }
+        msg = order.join("\n");
+    } else {
+        msg = "本局结束";
+    }
+    msg += QString("\n队伍0 等级：%1\n队伍1 等级：%2")
+               .arg(judge->getTeamLevel(0))
+               .arg(judge->getTeamLevel(1));
     QMessageBox::information(this, "游戏结束", msg);
 }

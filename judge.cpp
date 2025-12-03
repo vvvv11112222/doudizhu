@@ -24,11 +24,31 @@ std::vector<Card> Judge::getLastCards() const {
 int Judge::getCurrentTurn() const {
     return currentTurn;
 }
+int Judge::getTeamLevel(int teamId) const {
+    if (teamId < 0 || teamId >= static_cast<int>(teamLevels.size())) return 0;
+    return teamLevels[teamId];
+}
 void Judge::setPlayers(const std::vector<Player*>& newPlayers) {
     players.clear();
     players.assign(newPlayers.begin(), newPlayers.end());
     playerLastPlays.assign(players.size(), {});
     playerPassedRound.assign(players.size(), false);
+}
+std::vector<int> Judge::getPreviousPlacements() const {
+    return previousPlacements;
+}
+void Judge::resetForNewHand() {
+    finishOrder.clear();
+    lastCards.clear();
+    lastPlayer = -1;
+    lastWasPass = false;
+    if (!players.empty()) {
+        playerLastPlays.assign(players.size(), {});
+        playerPassedRound.assign(players.size(), false);
+    }
+    // 默认逆时针
+    direction = -1;
+    currentTurn = 0;
 }
 void Judge::setCurrentTurn(int turn) {
     if (turn < 0 || turn >= players.size()) {
@@ -292,6 +312,10 @@ bool Judge::isValidPlay(const std::vector<Card>& playCards) const {
     PlayInfo info = analyzePlay(playCards);
     return info.type != PlayType::Invalid;
 }
+int Judge::teammateOf(int playerId) const {
+    if (players.empty()) return -1;
+    return (playerId + 2) % static_cast<int>(players.size());
+}
 bool Judge::playHumanCard(const std::vector<Card>& playCards) {
     if (finishOrder.size()==4) return false;
     if (currentTurn != 0) {
@@ -327,6 +351,10 @@ bool Judge::playHumanCard(const std::vector<Card>& playCards) {
      playerPassedRound[0] = false;
     emit playerHandChanged(0);
     emit lastPlayUpdated(0);
+    int remain = players[0]->getCardCount();
+    if (remain > 0 && remain <= 10) {
+        emit playerReported(0, remain);
+    }
 
     // 5. 检查是否获胜
     checkVictory(0);
@@ -376,7 +404,10 @@ void Judge::playAICards(int aiId, const std::vector<Card>& aiChosen)
     playerLastPlays[aiId] = lastCards;
     emit lastPlayUpdated(aiId);
     emit playerHandChanged(aiId);
-
+    int remain = players[aiId]->getCardCount();
+    if (remain > 0 && remain <= 10) {
+        emit playerReported(aiId, remain);
+    }
     // 4. 检查如果游戏还没结束，继续下一轮
     if (finishOrder.size() < players.size()) {
         checkVictory(aiId);
@@ -387,13 +418,10 @@ void Judge::playAICards(int aiId, const std::vector<Card>& aiChosen)
 void Judge::humanPass() {
     if (finishOrder.size() == 4) return;
     if (currentTurn != 0) return;
-
-    // 如果 lastCards 为空（即你是先手，或者一轮结束刚轮到你），不允许 Pass
-    // 规则：拥有出牌权时不能不要。
-    if (lastCards.empty()) {
-        qWarning() << "当前由你出牌，不能跳过！";
-        return; // 这里可以加个信号通知 UI 弹窗提示
-    }
+    // if (lastCards.empty()) {
+    //     qWarning() << "当前由你出牌，不能跳过！";
+    //     return; // 这里可以加个信号通知 UI 弹窗提示
+    // }
 
     qInfo() << "人类玩家选择过";
     lastWasPass = true;
@@ -428,48 +456,36 @@ QString Judge::lastPlayString() const {
 
 void Judge::nextTurn() {
     if (finishOrder.size() >= players.size() - 1) {
-        emit gameFinished();
+        finalizeGame();
         return;
     }
 
-    // 1. 寻找下一个还没出完牌的玩家
-    int checkCount = 0;
-    do {
-        currentTurn = (currentTurn + 1) % players.size();
-        checkCount++;
-        // 如果找了一圈都没找到有牌的人，说明出bug了或者游戏结束了
-        if (checkCount > players.size()) {
-            emit gameFinished();
-            return;
+    int next = advanceTurnIndex(currentTurn);
+    if (next < 0) {
+        finalizeGame();
+        return;
+    }
+    currentTurn = next;
+
+    if (allOthersPassed()) {
+        int leader = lastPlayer;
+        if (leader < 0) leader = currentTurn;
+        if (leader >= 0 && players[leader]->getCardCount() == 0) {
+            int mate = teammateOf(leader);
+            if (mate >= 0 && players[mate]->getCardCount() > 0) {
+                leader = mate;
+                qInfo() << "借风出牌：队友" << leader << "承接出牌权";
+            }
         }
-    } while (players[currentTurn]->getCardCount() == 0);
-    bool roundOver = (currentTurn == lastPlayer);
-    qDebug() << "轮次切换到玩家：" << currentTurn;
+        startNewRound(leader);
+        currentTurn = leader;
+    }
 
-    // 2. 关键逻辑：检查是否“一轮游”（即其他人都不要，权回到了 lastPlayer 手里）
-    // 特殊情况：如果 lastPlayer 已经出完牌赢了，那么权应该交给他的下家（即当前的 currentTurn）
-    if (lastPlayer != -1 && players[lastPlayer]->getCardCount() == 0) {
-
-        qInfo() << "一轮结束，玩家" << currentTurn << "获得新出牌权";
-        lastCards.clear(); // 清空上家牌，意味着可以出任意牌
-        lastPlayer = -1;   // 重置 lastPlayer（可选，或者设为 currentTurn）
-        roundOver = true;
-    }
-    if (lastPlayer == -1) {
-        roundOver = true;
-    }
-    if (roundOver) {
-        startNewRound(currentTurn);
-    }
-    // 3. 发送轮次改变信号
     emit turnChanged();
 
-    // 4. 如果是 AI，触发思考
-    if (currentTurn != 0) { // 假设 0 是人类
-        // 延迟一会再出牌，体验更好
+    if (currentTurn != 0) {
         QTimer::singleShot(800, this, &Judge::aiPlay);
     } else {
-        // 是人类，通知 UI 启用按钮
         emit playerTurnStart(0);
     }
 }
@@ -490,7 +506,6 @@ void Judge::aiPlay() {
          playerLastPlays[currentTurn].clear();
         emit lastPlayUpdated(currentTurn);
     } else {
-        // 执行出牌（Judge 负责移除手牌 / 更新状态）
         qInfo() << "AI" << currentTurn << "出牌:" << chosen.size() << "张";
         players[currentTurn]->playCards(chosen);
         checkVictory(currentTurn);
@@ -501,6 +516,10 @@ void Judge::aiPlay() {
         emit playerHandChanged(currentTurn);
         playerLastPlays[currentTurn] = chosen;
         emit lastPlayUpdated(currentTurn);
+        int remain = players[currentTurn]->getCardCount();
+        if (remain > 0 && remain <= 10) {
+            emit playerReported(currentTurn, remain);
+        }
 
     }
     nextTurn();
@@ -509,16 +528,32 @@ bool Judge::hasPlayerPassed(int playerId) const {
     if (playerId < 0 || playerId >= (int)playerPassedRound.size()) return false;
     return playerPassedRound[playerId];
 }
+bool Judge::allOthersPassed() const {
+    if (lastCards.empty() || lastPlayer < 0) return false;
+    for (int i = 0; i < static_cast<int>(players.size()); ++i) {
+        if (players[i]->getCardCount() == 0) continue;
+        if (i == lastPlayer) continue;
+        if (!playerPassedRound[i]) return false;
+    }
+    return true;
+}
 
+int Judge::advanceTurnIndex(int startFrom) const {
+    if (players.empty()) return -1;
+    int idx = startFrom;
+    for (size_t step = 0; step < players.size(); ++step) {
+        idx = (idx + direction + players.size()) % players.size();
+        if (players[idx]->getCardCount() > 0) return idx;
+    }
+    return -1;
+}
 void Judge::startNewRound(int leaderId) {
     qInfo() << "=== 新的一轮开始，庄家：" << leaderId << " ===";
     lastCards.clear();
     lastPlayer = -1; // 或者设为 leaderId，视逻辑而定，这里设为 -1 表示桌面无牌
-
-    // 清空所有人的出牌记录和Pass状态
     for (auto& vec : playerLastPlays) vec.clear();
     std::fill(playerPassedRound.begin(), playerPassedRound.end(), false);
-
+    currentTurn = leaderId;
     // 通知 UI 清空桌面
     emit tableCleared();
 }
@@ -534,9 +569,106 @@ void Judge::checkVictory(int playerId) {
         qInfo() << "玩家" << playerId << "完成, 排名:" << place;
         emit playerFinished(playerId, place);
     }
-    if (!players.empty() && static_cast<int>(finishOrder.size()) >= static_cast<int>(players.size())) {
-        qInfo() << "所有玩家已完成，比赛结束";
-        emit gameFinished(); // 最终结束信号（不带参数）
+    if (!players.empty() && static_cast<int>(finishOrder.size()) >= static_cast<int>(players.size()) - 1) {
+        finalizeGame();
     }
 }
 
+void Judge::finalizeGame() {
+    // 补齐未出完的末游
+    if (players.size() > finishOrder.size()) {
+        for (int i = 0; i < static_cast<int>(players.size()); ++i) {
+            if (std::find(finishOrder.begin(), finishOrder.end(), i) == finishOrder.end()) {
+                finishOrder.push_back(i);
+            }
+        }
+    }
+    previousPlacements = finishOrder;
+    tributePending = true;
+
+    if (!finishOrder.empty()) {
+        int headTeam = finishOrder.front() % 2;
+        int delta = 0;
+        if (finishOrder.size() >= 2 && finishOrder[1] % 2 == headTeam) {
+            delta = 3;
+        } else if (finishOrder.size() >= 3 && finishOrder[2] % 2 == headTeam) {
+            delta = 2;
+        } else if (!finishOrder.empty() && finishOrder.back() % 2 == headTeam) {
+            delta = 1;
+        }
+        teamLevels[headTeam] = std::min(14, teamLevels[headTeam] + delta);
+        qInfo() << "队伍" << headTeam << "升级" << delta << "级，当前级别:" << teamLevels[headTeam];
+    }
+
+    emit gameFinished();
+}
+
+Card Judge::pickTributeCard(Player* donor) const {
+    Card best;
+    auto hand = donor->getHandCopy();
+    std::sort(hand.begin(), hand.end(), [](const Card& a, const Card& b){
+        if (a.getRankInt() != b.getRankInt()) return a.getRankInt() > b.getRankInt();
+        return static_cast<int>(a.getSuit()) > static_cast<int>(b.getSuit());
+    });
+    int forbiddenRank = teamLevels[donor->getID() % 2];
+    for (const auto& c : hand) {
+        if (c.getSuit() == Suit::Hearts && c.getRankInt() == forbiddenRank) {
+            continue;
+        }
+        best = c;
+        break;
+    }
+    return best;
+}
+
+Card Judge::pickReturnCard(Player* winner) const {
+    Card chosen;
+    auto hand = winner->getHandCopy();
+    std::sort(hand.begin(), hand.end(), [](const Card& a, const Card& b){
+        if (a.getRankInt() != b.getRankInt()) return a.getRankInt() < b.getRankInt();
+        return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
+    });
+    for (const auto& c : hand) {
+        if (c.getRankInt() <= 10) { chosen = c; break; }
+    }
+    return chosen;
+}
+
+void Judge::applyTributeAndReturn() {
+    if (!tributePending || previousPlacements.empty()) return;
+    int winner = previousPlacements.front();
+    int loser = previousPlacements.back();
+    if (previousPlacements.size() == players.size() - 1) {
+        for (int i = 0; i < static_cast<int>(players.size()); ++i) {
+            if (std::find(previousPlacements.begin(), previousPlacements.end(), i) == previousPlacements.end()) {
+                loser = i;
+                break;
+            }
+        }
+    }
+    if (winner < 0 || loser < 0 || winner == loser) { tributePending = false; return; }
+
+    int bigJokerCount = 0;
+    for (const auto& c : players[loser]->getHandCopy()) {
+        if (c.getRank() == Rank::B) bigJokerCount++;
+    }
+    if (bigJokerCount >= 2) {
+        qInfo() << "玩家" << loser << "抗贡成功";
+        tributePending = false;
+        return;
+    }
+
+    Card tribute = pickTributeCard(players[loser]);
+    if (players[loser]->playCards({tribute})) {
+        players[winner]->addCards({tribute});
+        qInfo() << "玩家" << loser << "向" << winner << "进贡" << QString::fromStdString(tribute.toString());
+    }
+    Card back = pickReturnCard(players[winner]);
+    if (back.getRankInt() > 0 && players[winner]->playCards({back})) {
+        players[loser]->addCards({back});
+        qInfo() << "玩家" << winner << "还牌" << QString::fromStdString(back.toString());
+    }
+    emit playerHandChanged(winner);
+    emit playerHandChanged(loser);
+    tributePending = false;
+}
