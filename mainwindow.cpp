@@ -6,7 +6,8 @@
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QPainterPath>
-
+#include <QStringList>
+#include <algorithm>
 // 放在 mainwindow.cpp 顶部
 
 // mainwindow.cpp 顶部的 CardDelegate 类
@@ -149,7 +150,7 @@ void MainWindow::setupUI()
     listHuman = new QListWidget;
     lblLastPlay = new QLabel("上家出牌：无");
     lblStatus = new QLabel("游戏状态：等待开始");
-
+    lblSelection = new QLabel("已选中：0 张 (无)");
     btnNewGame = new QPushButton("新游戏");
     btnPlay = new QPushButton("出牌");
     btnPass = new QPushButton("不要(过)");
@@ -233,6 +234,7 @@ void MainWindow::setupUI()
     humanPlayBox->addWidget(new QLabel("桌面 - 你的出牌"), 0, Qt::AlignCenter);
     humanPlayBox->addWidget(playCenterBottom);
     humanPlayBox->addWidget(new QLabel("你的手牌"));
+     humanPlayBox->addWidget(lblSelection);
     humanPlayBox->addWidget(listHuman);
     rowBottom->addLayout(humanPlayBox);
     rowBottom->addStretch();
@@ -375,6 +377,18 @@ void MainWindow::setupConnections() {
     connect(btnPass, &QPushButton::clicked, this, &MainWindow::onPassClicked);
     connect(btnNewGame, &QPushButton::clicked, this, [this]() {
         lblStatus->setText("正在开始新游戏...");
+        if (humanPlayer) {
+            humanPlayer->resetSelection();
+        }
+        // 清空 UI 中可能残留的上浮标记
+        if (listHuman) {
+            for (int i = 0; i < listHuman->count(); ++i) {
+                if (auto *item = listHuman->item(i)) {
+                    item->setData(Qt::UserRole, false);
+                }
+            }
+            listHuman->viewport()->update();
+        }
         QMetaObject::invokeMethod(gameManager, "startGame", Qt::QueuedConnection);
     });
     connect(judge, &Judge::lastPlayUpdated, this, [this](int playerId){
@@ -402,21 +416,14 @@ void MainWindow::setupConnections() {
 }
 void MainWindow::onCardClicked(QListWidgetItem *item) {
     if (!humanPlayer) return;
-
     int index = listHuman->row(item);
-    Card c = humanPlayer->getHandCopy()[index];
-
-    // 通知 Player 切换状态
-    humanPlayer->toggleSelectCard(c);
-
-    // 更新 UI 视觉状态
-    // 怎么让 Delegate 知道这个 item 被选中了？
-    // 我们可以借用 item 的 CheckState 或者 UserRole
-    bool isSelected = (item->data(Qt::UserRole).toBool());
-    item->setData(Qt::UserRole, !isSelected); // 切换
-
+    humanPlayer->toggleSelectCard(index);
+    bool nowSelected = humanPlayer->isIndexSelected(index);
+    item->setData(Qt::UserRole, nowSelected); // 切换
     listHuman->viewport()->update(); // 强制重绘，触发 Delegate 的上浮动画
+    refreshSelectionSummary();
 }
+
 void MainWindow::onSelectionChanged() {
     QList<QListWidgetItem*> selectedItems = listHuman->selectedItems();
 
@@ -448,15 +455,11 @@ void MainWindow::onSelectionChanged() {
 
 void MainWindow::onPlayClicked() {
     if (!humanPlayer || !judge) return;
-
-    // 如果当前并非人类玩家回合，直接提示，避免错误的“规则不符”警告
     if (judge->getCurrentTurn() != 0) {
         QMessageBox::information(this, "提示", "现在还没轮到你出牌");
         return;
     }
     auto cards = humanPlayer->getSelectedCards();
-
-    // 如果玩家界面的选中状态丢失，兜底读取 QListWidget 的 UserRole 标记
     if (cards.empty()) {
         std::vector<Card> fallbackSelection;
         std::vector<Card> humanHand = humanPlayer->getHandCopy();
@@ -502,9 +505,10 @@ void MainWindow::updateUI() {
     // 1. 刷新人类手牌（保持不变，但确保用新的 Delegate）
     listHuman->clear();
     std::vector<Card> humanHand = humanPlayer->getHandCopy();
-    for (const auto& card : humanHand) {
+    for (size_t i = 0; i < humanHand.size(); ++i) {
+        const auto& card = humanHand[i];
         QListWidgetItem* item = new QListWidgetItem(QString::fromStdString(card.toString()));
-        bool selected = humanPlayer->isCardSelected(card);
+        bool selected = humanPlayer->isIndexSelected(static_cast<int>(i));
         item->setData(Qt::UserRole, selected); // 初始化选中状态
         listHuman->addItem(item);
     }
@@ -570,6 +574,23 @@ void MainWindow::updateUI() {
         listHuman->setEnabled(false);
         btnPass->setText("不要");
     }
+
+    refreshSelectionSummary();
+}
+
+void MainWindow::refreshSelectionSummary() {
+    if (!humanPlayer || !lblSelection) return;
+
+    std::vector<Card> selected = humanPlayer->getSelectedCards();
+    QStringList parts;
+    for (const auto &card : selected) {
+        parts << QString::fromStdString(card.toString());
+    }
+
+    QString detail = parts.isEmpty() ? QStringLiteral("无") : parts.join(QStringLiteral(", "));
+    lblSelection->setText(QStringLiteral("已选中：%1 张 (%2)")
+                              .arg(selected.size())
+                              .arg(detail));
 }
 void MainWindow::onGameFinished() {
     QString msg = "over";

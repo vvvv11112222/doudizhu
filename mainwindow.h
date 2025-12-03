@@ -27,6 +27,7 @@ private slots:
 private:
     void setupUI();
     void setupConnections();
+    void refreshSelectionSummary();
     GameManager *gameManager;
     Judge *judge;
     HumanPlayer *humanPlayer;
@@ -43,6 +44,7 @@ private:
     QListWidget *playCenterBottom; // 中央下：显示 Human 的出牌（位于人类手牌上方）
     QLabel *lblLastPlay;
     QLabel *lblStatus;
+    QLabel *lblSelection;
     QPushButton *btnPass;
     QPushButton *btnNewGame;
     //出牌按键

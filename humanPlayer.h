@@ -18,7 +18,7 @@ public:
     Q_INVOKABLE void requestMove(const std::vector<Card>& lastPlay);
 
     // UI -> HumanPlayer：用户点击某张牌（通过索引）
-    Q_SLOT void toggleSelectCard(const Card& card);    // 切换选牌状态
+    Q_SLOT void toggleSelectCard(int index);    // 切换选牌状态
     Q_SLOT void onUserConfirmPlay();              // 用户点击“出牌”按钮
     Q_SLOT void onUserPass();                     // 用户点击“过”按钮
     Q_SLOT void onUserRequestHint();              // 用户请求提示（可与 Judge 协作）
@@ -26,8 +26,9 @@ public:
     // 只读方法，供 MainWindow 获取显示数据
     Q_INVOKABLE std::vector<Card> getHandCopy() const;
     Q_INVOKABLE std::vector<Card> getSelectedCards() const; // 返回当前被选的牌索引
-    bool isCardSelected(const Card& card) const;
-    void resetSelection() { selectedCards_.clear(); }
+    int getSelectedCount() const { return static_cast<int>(selectedIndices_.size()); }
+    bool isIndexSelected(int index) const;
+    void resetSelection() { selectedIndices_.clear(); }
 signals:
     // HumanPlayer 发给 GameManager 的信号
     void moveReady(const std::vector<Card>& cards); // 玩家确认出牌（候选）
@@ -40,7 +41,7 @@ signals:
 
 private:
     // 维护一份选中索引列表（UI 交互用）
-    std::vector<Card> selectedCards_;
+    std::vector<int> selectedIndices_;
 
     // 内部帮助函数：把选中索引转换为 Card 向量
     std::vector<Card> selectedCardsFromIndices() const;
