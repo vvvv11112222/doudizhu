@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <set>
+#include <functional>
+#include <numeric>
 #include <QTimer>
 #include <QDebug>
 
@@ -12,148 +15,378 @@ AIPlayer::AIPlayer(int id, const std::string& name, QObject* parent)
 {
 }
 
-// 判断牌型（支持：Single, Pair, Triple, Triple+Single (treated as size==4 but checked in isValidPlay),
-// Bomb（4+ same rank））
-HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards) const {
-    if (cards.empty()) return HandType::Invalid;
-    if (cards.size() == 1) return HandType::Single;
-    if (cards.size() == 2) {
-        if (cards[0].getRank() == cards[1].getRank()) return HandType::Pair;
-        return HandType::Invalid;
-    }
-    if (cards.size() == 3) {
-        if (cards[0].getRank() == cards[1].getRank() && cards[1].getRank() == cards[2].getRank())
-            return HandType::Trips;
-        return HandType::Invalid;
-    }
-    // size >=4: could be bomb (4+ same rank) or three+single (4) or larger bombs
-    // We'll treat 4+ same rank as Bomb
-    bool allSame = true;
-    for (const auto &c : cards) {
-        if (c.getRank() != cards[0].getRank()) { allSame = false; break; }
-    }
-    if (allSame && cards.size() >= 4) return HandType::Bomb;
-
-    // allow three+single detection: size == 4 and one rank appears 3 times
-    if (cards.size() == 4) {
-        std::map<int,int> cnt;
-        for (const auto &c : cards) cnt[c.getRankInt()]++;
-        for (auto &kv : cnt) {
-            if (kv.second == 3) return HandType::Trips; // treat as triple-type for comparison
-        }
-    }
-
-    return HandType::Invalid;
+HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards, int levelRank) const {
+    HandMatcher matcher(cards, levelRank);
+    return matcher.analyze().type;
 }
 
 // 主值：返回用于比较同类牌大小的关键点（例如对子/单张等取 rank int）
-int AIPlayer::primaryRank(const std::vector<Card>& cards) const {
-    if (cards.empty()) return 0;
-    // For triples with extra cards (3+1), find the rank that appears majority
-    std::map<int,int> cnt;
-    for (const auto &c : cards) cnt[c.getRankInt()]++;
-    int bestRank = cards.front().getRankInt();
-    int bestCnt = 0;
-    for (auto &kv : cnt) {
-        if (kv.second > bestCnt) {
-            bestCnt = kv.second;
-            bestRank = kv.first;
-        }
-    }
-    return bestRank;
+int AIPlayer::primaryRank(const std::vector<Card>& cards, int levelRank) const {
+    HandMatcher matcher(cards, levelRank);
+    return matcher.analyze().primaryRank;
 }
 
 // 优化 canBeat 逻辑，防止 AI 试图用 3 张牌管 1 张牌等低级错误
-bool AIPlayer::canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base) const {
+bool AIPlayer::canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base, int levelRank) const {
     if (candidate.empty() || base.empty()) return false;
 
-    HandType tc = evaluateHandType(candidate);
-    HandType tb = evaluateHandType(base);
+    HandMatcher candMatcher(candidate, levelRank);
+    HandMatcher baseMatcher(base, levelRank);
 
-    if (tc == HandType::Invalid || tb == HandType::Invalid) return false;
+    PlayInfo candInfo = candMatcher.analyze();
+    PlayInfo baseInfo = baseMatcher.analyze();
 
-    // 1. 炸弹逻辑
-    if (tc == HandType::Bomb && tb != HandType::Bomb) return true;
-    if (tc != HandType::Bomb && tb == HandType::Bomb) return false;
-    if (tc == HandType::Bomb && tb == HandType::Bomb) {
-        // 炸弹比大小：先比张数，再比点数
-        if (candidate.size() > base.size()) return true;
-        if (candidate.size() < base.size()) return false;
-        return primaryRank(candidate) > primaryRank(base);
+    if (candInfo.type == HandType::Invalid || baseInfo.type == HandType::Invalid) return false;
+
+    // 1. 炸弹及天王炸逻辑
+    bool candBomb = candInfo.type == HandType::Bomb || candInfo.type == HandType::StraightFlush || candInfo.type == HandType::TianWang;
+    bool baseBomb = baseInfo.type == HandType::Bomb || baseInfo.type == HandType::StraightFlush || baseInfo.type == HandType::TianWang;
+
+    if (candBomb && !baseBomb) return true;
+    if (!candBomb && baseBomb) return false;
+    if (candBomb && baseBomb) {
+        if (candInfo.type != baseInfo.type) return static_cast<int>(candInfo.type) > static_cast<int>(baseInfo.type);
+        if (candInfo.size != baseInfo.size) return candInfo.size > baseInfo.size;
+        return candInfo.primaryRank > baseInfo.primaryRank;
     }
 
     // 2. 普通牌逻辑：必须【类型相同】且【张数相同】
-    if (tc != tb) return false;
+    if (candInfo.type != baseInfo.type) return false;
     if (candidate.size() != base.size()) return false;
 
-    return primaryRank(candidate) > primaryRank(base);
+    return candInfo.primaryRank > baseInfo.primaryRank;
 }
 
-// 生成可能出牌（单张 / 对子 / 三张 / 三带一 / 炸弹(4+)）
-// 返回 vector of candidate plays (each is vector<Card>)
-std::vector<std::vector<Card>> AIPlayer::generatePossiblePlays() const {
-    std::vector<std::vector<Card>> out;
+std::vector<std::vector<Card>> AIPlayer::generatePossiblePlays(int levelRank) const {
+    std::vector<std::vector<Card>> valid;
     std::vector<Card> hand = getHandCopy();
+    if (hand.empty()) return valid;
 
-    if (hand.empty()) return out;
+    // 判定红桃级牌（万能牌）
+    auto isWild = [levelRank](const Card& c) {
+        return c.getSuit() == Suit::Hearts && c.getRankInt() == levelRank;
+    };
 
-    // sort by rank then suit for deterministic grouping
+    // 预处理：按点数、花色分组，并拆出万能牌
+    std::map<int, std::vector<Card>> rankGroups;            // 非万能牌按点数聚合
+    std::map<int, std::vector<Card>> logGroups;             // 用逻辑值做键（便于连续判断）
+    std::map<Suit, std::map<int, std::vector<Card>>> suitGroups; // 同花顺使用
+    std::vector<Card> wildCards;
+
+    auto logValue = [levelRank](const Card& c) {
+        int r = c.getRankInt();
+        if (c.getRank() == Rank::B) return 20;
+        if (c.getRank() == Rank::S) return 19;
+        if (r == levelRank) return 18;
+        if (r == 15) return 2; // 还原 2
+        return r;
+    };
+
     std::sort(hand.begin(), hand.end(), [](const Card& a, const Card& b){
         if (a.getRankInt() != b.getRankInt()) return a.getRankInt() < b.getRankInt();
         return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
     });
 
-    // singles
-    for (const auto& c : hand) out.push_back(std::vector<Card>{c});
-
-    // group by rank
-    std::map<int, std::vector<int>> idx; // rankInt -> indices in hand
-    for (int i = 0; i < (int)hand.size(); ++i) {
-        idx[hand[i].getRankInt()].push_back(i);
+    for (const auto& c : hand) {
+        if (isWild(c)) {
+            wildCards.push_back(c);
+            continue;
+        }
+        int r = c.getRankInt();
+        rankGroups[r].push_back(c);
+        logGroups[logValue(c)].push_back(c);
+        if (c.getSuit() != Suit::None) {
+            suitGroups[c.getSuit()][c.getRankInt()].push_back(c);
+        }
     }
 
-    // pairs/triples/bombs and triple+single (3+1)
-    for (auto &kv : idx) {
-        const std::vector<int>& ids = kv.second;
-        if (ids.size() >= 2) {
-            // pair (take first two)
-            out.push_back(std::vector<Card>{ hand[ids[0]], hand[ids[1]] });
+    std::set<std::string> seen;
+    auto keyOf = [](const std::vector<Card>& cards) {
+        std::vector<Card> sorted = cards;
+        std::sort(sorted.begin(), sorted.end(), [](const Card& a, const Card& b){
+            if (a.getRankInt() != b.getRankInt()) return a.getRankInt() < b.getRankInt();
+            return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
+        });
+        std::string key;
+        for (const auto& c : sorted) key += c.toString() + "|";
+        return key;
+    };
+
+    auto addIfValid = [&](const std::vector<Card>& cards) {
+        if (cards.empty()) return;
+        if (evaluateHandType(cards, levelRank) == HandType::Invalid) return;
+        std::string key = keyOf(cards);
+        if (seen.insert(key).second) valid.push_back(cards);
+    };
+
+    // 组合生成器：从 src 中选择 k 张的所有组合
+    auto choose = [](const std::vector<Card>& src, int k) {
+        std::vector<std::vector<Card>> res;
+        if (k == 0) { res.push_back({}); return res; }
+        if (k > static_cast<int>(src.size())) return res;
+        std::vector<int> idx(k);
+        std::iota(idx.begin(), idx.end(), 0);
+        while (true) {
+            std::vector<Card> pick;
+            for (int i : idx) pick.push_back(src[i]);
+            res.push_back(pick);
+            int pos = k - 1;
+            while (pos >= 0 && idx[pos] == static_cast<int>(src.size()) - k + pos) pos--;
+            if (pos < 0) break;
+            idx[pos]++;
+            for (int j = pos + 1; j < k; ++j) idx[j] = idx[j - 1] + 1;
         }
-        if (ids.size() >= 3) {
-            out.push_back(std::vector<Card>{ hand[ids[0]], hand[ids[1]], hand[ids[2]] });
-            // three+single: combine triple with any other single card
-            for (int j = 0; j < (int)hand.size(); ++j) {
-                if (std::find(ids.begin(), ids.end(), j) == ids.end()) {
-                    std::vector<Card> t = { hand[ids[0]], hand[ids[1]], hand[ids[2]], hand[j] };
-                    out.push_back(t);
+        return res;
+    };
+
+    // 1) 基础牌型：单、对、三（含万能牌补全）
+    for (const auto& [rank, cards] : rankGroups) {
+        int sz = static_cast<int>(cards.size());
+        for (int take = 1; take <= std::min(3, sz); ++take) {
+            for (const auto& subset : choose(cards, take)) {
+                addIfValid(subset);
+            }
+        }
+        for (int need = 1; need <= 3; ++need) {
+            int maxWild = std::min(need, static_cast<int>(wildCards.size()));
+            for (int wildUse = 1; wildUse <= maxWild; ++wildUse) {
+                int solidNeed = need - wildUse;
+                if (solidNeed < 0 || solidNeed > sz) continue;
+                for (const auto& subset : choose(cards, solidNeed)) {
+                    std::vector<Card> combo = subset;
+                    combo.insert(combo.end(), wildCards.begin(), wildCards.begin() + wildUse);
+                    addIfValid(combo);
                 }
             }
         }
-        if (ids.size() >= 4) {
-            // bomb: all same-rank cards
-            std::vector<Card> bomb;
-            for (int id : ids) bomb.push_back(hand[id]);
-            out.push_back(bomb);
+    }
+    for (int need = 1; need <= std::min(3, static_cast<int>(wildCards.size())); ++need) {
+        addIfValid(std::vector<Card>(wildCards.begin(), wildCards.begin() + need));
+    }
+
+    // 2) 炸弹：同点数 4+，可用万能牌补足
+    int wildTotal = static_cast<int>(wildCards.size());
+    for (const auto& [rank, cards] : rankGroups) {
+        int sz = static_cast<int>(cards.size());
+        for (int total = 4; total <= sz + wildTotal; ++total) {
+            int minSolids = std::max(1, total - wildTotal);
+            int maxSolids = std::min(total, sz);
+            for (int solidsTake = minSolids; solidsTake <= maxSolids; ++solidsTake) {
+                int wildNeed = total - solidsTake;
+                for (const auto& subset : choose(cards, solidsTake)) {
+                    std::vector<Card> combo = subset;
+                    if (wildNeed > 0) {
+                        combo.insert(combo.end(), wildCards.begin(), wildCards.begin() + wildNeed);
+                    }
+                    addIfValid(combo);
+                }
+            }
         }
     }
 
-    // Note: may contain duplicates (e.g., different triples from different ranks).
-    // We can optionally deduplicate by string representation to keep candidates smaller.
-    std::vector<std::vector<Card>> dedup;
-    std::set<std::string> seen;
-    for (auto &cand : out) {
-        std::string key;
-        for (auto &c : cand) key += c.toString() + "|";
-        if (seen.insert(key).second) dedup.push_back(cand);
+    // 3) 天王炸：2 大王 + 2 小王
+    auto jokerCount = [&](Rank r) {
+        auto it = rankGroups.find(static_cast<int>(r));
+        if (it == rankGroups.end()) return 0;
+        return static_cast<int>(it->second.size());
+    };
+    if (jokerCount(Rank::S) >= 2 && jokerCount(Rank::B) >= 2) {
+        std::vector<Card> combo;
+        combo.insert(combo.end(), rankGroups.at(static_cast<int>(Rank::S)).begin(), rankGroups.at(static_cast<int>(Rank::S)).begin() + 2);
+        combo.insert(combo.end(), rankGroups.at(static_cast<int>(Rank::B)).begin(), rankGroups.at(static_cast<int>(Rank::B)).begin() + 2);
+        addIfValid(combo);
     }
 
-    return dedup;
+    // 4) 三带二 (Full House)：遍历三张点数 + 对子点数，允许万能牌分配
+    for (const auto& [tripRank, tripCards] : rankGroups) {
+        for (const auto& [pairRank, pairCards] : rankGroups) {
+            for (int wildTrip = 0; wildTrip <= wildTotal; ++wildTrip) {
+                for (int wildPair = 0; wildPair + wildTrip <= wildTotal; ++wildPair) {
+                    int needTrip = 3 - wildTrip;
+                    int needPair = 2 - wildPair;
+                    if (needTrip < 0 || needPair < 0) continue;
+                    if (needTrip > static_cast<int>(tripCards.size())) continue;
+                    if (needPair > static_cast<int>(pairCards.size())) continue;
+                    if (needTrip + needPair + wildTrip + wildPair != 5) continue;
+
+                    for (const auto& tSubset : choose(tripCards, needTrip)) {
+                        for (const auto& pSubset : choose(pairCards, needPair)) {
+                            std::vector<Card> combo = tSubset;
+                            combo.insert(combo.end(), pSubset.begin(), pSubset.end());
+                            combo.insert(combo.end(), wildCards.begin(), wildCards.begin() + wildTrip + wildPair);
+                            addIfValid(combo);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 5) 三连对 (334455)，要求 3 个连续点数，每个点数最多两张，万能牌 < 2
+    std::vector<int> logKeys;
+    for (const auto& kv : logGroups) logKeys.push_back(kv.first);
+    std::sort(logKeys.begin(), logKeys.end());
+    for (size_t i = 0; i + 2 < logKeys.size(); ++i) {
+        int a = logKeys[i], b = logKeys[i + 1], c = logKeys[i + 2];
+        if (b != a + 1 || c != b + 1) continue;
+        const auto& g1 = logGroups[a];
+        const auto& g2 = logGroups[b];
+        const auto& g3 = logGroups[c];
+        // 不用万能牌
+        if (g1.size() >= 2 && g2.size() >= 2 && g3.size() >= 2) {
+            for (const auto& p1 : choose(g1, 2)) {
+                for (const auto& p2 : choose(g2, 2)) {
+                    for (const auto& p3 : choose(g3, 2)) {
+                        std::vector<Card> combo;
+                        combo.insert(combo.end(), p1.begin(), p1.end());
+                        combo.insert(combo.end(), p2.begin(), p2.end());
+                        combo.insert(combo.end(), p3.begin(), p3.end());
+                        addIfValid(combo);
+                    }
+                }
+            }
+        }
+        // 使用 1 张万能牌补任意一组
+        if (wildTotal >= 1) {
+            // 补第一组
+            if (g1.size() >= 1 && g2.size() >= 2 && g3.size() >= 2) {
+                for (const auto& p1 : choose(g1, 1)) {
+                    for (const auto& p2 : choose(g2, 2)) {
+                        for (const auto& p3 : choose(g3, 2)) {
+                            std::vector<Card> combo;
+                            combo.insert(combo.end(), p1.begin(), p1.end());
+                            combo.insert(combo.end(), p2.begin(), p2.end());
+                            combo.insert(combo.end(), p3.begin(), p3.end());
+                            combo.push_back(wildCards[0]);
+                            addIfValid(combo);
+                        }
+                    }
+                }
+            }
+            // 补第二组
+            if (g1.size() >= 2 && g2.size() >= 1 && g3.size() >= 2) {
+                for (const auto& p1 : choose(g1, 2)) {
+                    for (const auto& p2 : choose(g2, 1)) {
+                        for (const auto& p3 : choose(g3, 2)) {
+                            std::vector<Card> combo;
+                            combo.insert(combo.end(), p1.begin(), p1.end());
+                            combo.insert(combo.end(), p2.begin(), p2.end());
+                            combo.insert(combo.end(), p3.begin(), p3.end());
+                            combo.push_back(wildCards[0]);
+                            addIfValid(combo);
+                        }
+                    }
+                }
+            }
+            // 补第三组
+            if (g1.size() >= 2 && g2.size() >= 2 && g3.size() >= 1) {
+                for (const auto& p1 : choose(g1, 2)) {
+                    for (const auto& p2 : choose(g2, 2)) {
+                        for (const auto& p3 : choose(g3, 1)) {
+                            std::vector<Card> combo;
+                            combo.insert(combo.end(), p1.begin(), p1.end());
+                            combo.insert(combo.end(), p2.begin(), p2.end());
+                            combo.insert(combo.end(), p3.begin(), p3.end());
+                            combo.push_back(wildCards[0]);
+                            addIfValid(combo);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 6) 钢板 (333444)，要求连续两组三张，万能牌 < 2
+    for (size_t i = 0; i + 1 < logKeys.size(); ++i) {
+        int a = logKeys[i], b = logKeys[i + 1];
+        if (b != a + 1) continue;
+        const auto& g1 = logGroups[a];
+        const auto& g2 = logGroups[b];
+        // 不用万能牌
+        if (g1.size() >= 3 && g2.size() >= 3) {
+            for (const auto& p1 : choose(g1, 3)) {
+                for (const auto& p2 : choose(g2, 3)) {
+                    std::vector<Card> combo;
+                    combo.insert(combo.end(), p1.begin(), p1.end());
+                    combo.insert(combo.end(), p2.begin(), p2.end());
+                    addIfValid(combo);
+                }
+            }
+        }
+        // 使用 1 张万能牌补任意一组
+        if (wildTotal >= 1) {
+            // 补第一组
+            if (g1.size() >= 2 && g2.size() >= 3) {
+                for (const auto& p1 : choose(g1, 2)) {
+                    for (const auto& p2 : choose(g2, 3)) {
+                        std::vector<Card> combo;
+                        combo.insert(combo.end(), p1.begin(), p1.end());
+                        combo.insert(combo.end(), p2.begin(), p2.end());
+                        combo.push_back(wildCards[0]);
+                        addIfValid(combo);
+                    }
+                }
+            }
+            // 补第二组
+            if (g1.size() >= 3 && g2.size() >= 2) {
+                for (const auto& p1 : choose(g1, 3)) {
+                    for (const auto& p2 : choose(g2, 2)) {
+                        std::vector<Card> combo;
+                        combo.insert(combo.end(), p1.begin(), p1.end());
+                        combo.insert(combo.end(), p2.begin(), p2.end());
+                        combo.push_back(wildCards[0]);
+                        addIfValid(combo);
+                    }
+                }
+            }
+        }
+    }
+
+    // 7) 同花顺：同花 5 连张，可用万能牌补齐缺口
+    for (const auto& [suit, rankMap] : suitGroups) {
+        auto findRankCard = [&](int r) -> const Card* {
+            auto it = rankMap.find(r);
+            if (it != rankMap.end() && !it->second.empty()) return &it->second.front();
+            if (r == 2) {
+                auto it15 = rankMap.find(15);
+                if (it15 != rankMap.end() && !it15->second.empty()) return &it15->second.front();
+            }
+            return nullptr;
+        };
+
+        // 枚举起点 2~10 (10,J,Q,K,A)
+        for (int start = 2; start <= 10; ++start) {
+            std::vector<Card> seq;
+            int missing = 0;
+            for (int r = start; r < start + 5; ++r) {
+                if (const Card* card = findRankCard(r)) seq.push_back(*card);
+                else missing++;
+            }
+            if (missing > wildTotal) continue;
+            seq.insert(seq.end(), wildCards.begin(), wildCards.begin() + missing);
+            addIfValid(seq);
+        }
+        // 特殊检查 A2345
+        std::vector<int> wheel = {14, 2, 3, 4, 5};
+        std::vector<Card> seq;
+        int missing = 0;
+        for (int r : wheel) {
+            if (const Card* card = findRankCard(r)) seq.push_back(*card);
+            else missing++;
+        }
+        if (missing <= wildTotal) {
+            seq.insert(seq.end(), wildCards.begin(), wildCards.begin() + missing);
+            addIfValid(seq);
+        }
+    }
+
+    return valid;
 }
 
 // 根据上家牌选择出牌：空 lastCards -> 随机选一个 possible play
 // 非空 -> 找出能压制上家的所有 candidate，返回最小能压制牌（保守策略）
-std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
-    auto possible = generatePossiblePlays();
+std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards, int levelRank) {
+    auto possible = generatePossiblePlays(levelRank);
     if (possible.empty()) return {};
 
     // shuffle possible a bit to avoid deterministic behaviour when choosing random
@@ -164,7 +397,7 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
         // try to select a non-bomb first
         std::vector<int> nonbomb_idxs;
         for (int i = 0; i < (int)possible.size(); ++i) {
-            if (evaluateHandType(possible[i]) != HandType::Bomb) nonbomb_idxs.push_back(i);
+            if (evaluateHandType(possible[i], levelRank) != HandType::Bomb) nonbomb_idxs.push_back(i);
         }
         if (!nonbomb_idxs.empty()) {
             std::uniform_int_distribution<int> dist(0, (int)nonbomb_idxs.size()-1);
@@ -177,7 +410,7 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
     // find beating candidates
     std::vector<std::vector<Card>> beating;
     for (auto &cand : possible) {
-        if (canBeat(cand, lastCards)) beating.push_back(cand);
+        if (canBeat(cand, lastCards, levelRank)) beating.push_back(cand);
     }
     if (beating.empty()) return {}; // pass
 
@@ -188,18 +421,20 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
         case HandType::Pair:   return 2;
         case HandType::Trips: return 3;
         case HandType::Bomb:   return 4;
+        case HandType::StraightFlush: return 5;
+        case HandType::TianWang: return 6;
         default: return 0;
         }
     };
 
     std::sort(beating.begin(), beating.end(), [&](const std::vector<Card>& a, const std::vector<Card>& b){
-        HandType ta = evaluateHandType(a);
-        HandType tb = evaluateHandType(b);
+        HandType ta = evaluateHandType(a, levelRank);
+        HandType tb = evaluateHandType(b, levelRank);
         int rta = rankForType(ta);
         int rtb = rankForType(tb);
         if (rta != rtb) return rta < rtb; // prefer weaker hand type
-        int ra = primaryRank(a);
-        int rb = primaryRank(b);
+        int ra = primaryRank(a, levelRank);
+        int rb = primaryRank(b, levelRank);
         if (ra != rb) return ra < rb;     // prefer smaller primary rank
         if (a.size() != b.size()) return a.size() < b.size();
         // fallback lexicographic by card string
@@ -213,11 +448,11 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
 }
 
 // aiPlay slot: simulate think delay and then emit moveReady(selected) or passed()
-void AIPlayer::aiPlay(const std::vector<Card>& lastPlay) {
+void AIPlayer::aiPlay(const std::vector<Card>& lastPlay, int levelRank) {
     // schedule the decision after thinkDelayMs_ to simulate thinking
-    QTimer::singleShot(thinkDelayMs_, this, [this, lastPlay]() {
+    QTimer::singleShot(thinkDelayMs_, this, [this, lastPlay, levelRank]() {
         try {
-            std::vector<Card> chosen = decideToMove(lastPlay);
+            std::vector<Card> chosen = decideToMove(lastPlay, levelRank);
             if (chosen.empty()) {
                 emit passed();
             } else {
