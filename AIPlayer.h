@@ -13,6 +13,7 @@ class AIPlayer : public QObject, public Player {
 public:
     explicit AIPlayer(int id, const std::string& name = "AI", QObject* parent = nullptr);
     ~AIPlayer() override = default;
+
     // 方法1：判断牌型（使用 HandMatcher）
     HandType evaluateHandType(const std::vector<Card>& cards, int levelRank) const;
 
@@ -21,8 +22,8 @@ public:
 
     // 方法3：根据上家牌选择出牌（空表示过）
     std::vector<Card> decideToMove(const std::vector<Card>& lastCards, int levelRank);
-public slots:
 
+public slots:
     void aiPlay(const std::vector<Card>& lastPlay, int levelRank);
 
 signals:
