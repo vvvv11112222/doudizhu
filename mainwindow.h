@@ -22,7 +22,6 @@ private slots:
     void onSelectionChanged();
     void onPlayClicked();       // 点击“出牌”按钮
     void onPassClicked();       // 点击“过”按钮
-    void onGameFinished();
     void onCardClicked(QListWidgetItem *item);
 private:
     void setupUI();
@@ -52,6 +51,9 @@ private:
     //出牌按键
     QPushButton *btnPlay;
     QPushButton *btnPlayerPlay;
+
+    //强制获胜
+     QPushButton *btnCheatWin;
 };
 
 #endif // MAINWINDOW_H

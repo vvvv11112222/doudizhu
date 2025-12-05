@@ -40,30 +40,39 @@ void GameManager::initTurnQueue() {
 
     emit turnQueueUpdated();
 }
-void GameManager::startGame() {
+void GameManager::startNextRound() {
+    // 1. 清理手牌
     for (auto& player : players_) {
-        player->clearHand(); // 假设你有一个 clearHand() 方法
+        player->clearHand();
     }
-     judge_->resetForNewHand();
-    // 1. 构建并洗牌（快速操作）
+
+    // 2. 重置裁判状态（但不重置等级）
+    judge_->resetForNewHand();
+
+    // 3. 洗牌发牌
     deck_.buildDeck();
     deck_.shuffleDeck();
-
-    // 2. 发牌（示例：轮发）
     auto hands = deck_.dealRoundRobin(static_cast<int>(players_.size()));
-    // 3. 分发给 players，并通知 UI 每个玩家手牌变化
+
     for (int i = 0; i < players_.size(); ++i) {
-        std::vector<Card> stdHand = hands[i];
-        players_[i]->setHand(stdHand);
+        players_[i]->setHand(hands[i]);
         emit playerDealt(i);
     }
+
+    // 4. 进贡逻辑（如果是第二局及以上，Judge会自动处理）
     judge_->applyTributeAndReturn();
+
     emit gameStarted();
 
+    // 5. 初始化出牌队列并开始
     initTurnQueue();
+    judge_->beginFirstTurn();
+}
+void GameManager::startNewGame() {
     if (judge_) {
-        judge_->beginFirstTurn();
+        judge_->resetGameLevels(); // 重置回打2
     }
+    startNextRound();
 }
 void GameManager::processNextTurn() {
     if (turnQueue_.empty()) return;

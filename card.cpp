@@ -48,7 +48,7 @@ int Card::getRankInt() const noexcept {
     case Rank::Queen: return 12;
     case Rank::King:  return 13;
     case Rank::Ace:   return 14;
-    case Rank::Two:   return 15;
+    case Rank::Two:   return 2;
     case Rank::S: return 16;
     case Rank::B: return 17;
     default:          return 0;
@@ -56,6 +56,9 @@ int Card::getRankInt() const noexcept {
 }
 
 std::string Card::toString() const {
+    if (rank == Rank::S || rank == Rank::B) {
+        return getRankString();  // 大小王只有点数，没有花色
+    }
     return getSuitString() + getRankString();
 }
 

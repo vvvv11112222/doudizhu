@@ -8,6 +8,7 @@
 #include <array>
 #include "card.h"
 #include "player.h"
+#include "AIPlayer.h"
 class Judge : public QObject {
     Q_OBJECT
 public:
@@ -45,6 +46,9 @@ public:
     QString lastPlayString() const;
     int currentPlayerIndex() const { return currentTurn; }
     void setCurrentTurn(int turn);
+    void resetGameLevels();
+    //直接获胜，方便测试
+    void debugDirectWin(int playerId);
 
 signals:
     void playerHandChanged(int playerId);
@@ -55,6 +59,7 @@ signals:
     void gameFinished();
     void playerTurnStart(int currentTurn);
     void playerReported(int playerId, int remainCards);
+    void matchFinished(int winningTeam);
 private:
     int currentTurn;
     // 出牌方向：1 表示逆时针（0 -> 1 -> 2 -> 3），-1 表示顺时针

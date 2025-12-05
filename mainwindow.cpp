@@ -8,6 +8,7 @@
 #include <QPainterPath>
 #include <QStringList>
 #include <algorithm>
+#include <QTimer>
 // 放在 mainwindow.cpp 顶部
 
 // mainwindow.cpp 顶部的 CardDelegate 类
@@ -156,6 +157,12 @@ void MainWindow::setupUI()
     btnNewGame = new QPushButton("新游戏");
     btnPlay = new QPushButton("出牌");
     btnPass = new QPushButton("不要(过)");
+    btnCheatWin = new QPushButton("测试：一键获胜");
+    btnCheatWin->setStyleSheet(
+        "QPushButton { background-color: #8E44AD; color: white; border: 2px solid #5B2C6F; border-radius: 15px; font-weight: bold; padding: 5px; }"
+        "QPushButton:hover { background-color: #9B59B6; }"
+        "QPushButton:pressed { background-color: #71368A; }"
+        );
 
     btnPlay->setEnabled(false);
     btnPass->setEnabled(false);
@@ -248,6 +255,7 @@ void MainWindow::setupUI()
     buttons->addWidget(btnNewGame);
     buttons->addWidget(btnPlay);
     buttons->addWidget(btnPass);
+    buttons->addWidget(btnCheatWin);
 
     mainLay->addLayout(rowTop);
     mainLay->addLayout(rowMiddle);
@@ -379,8 +387,21 @@ void MainWindow::setupConnections() {
     connect(listHuman, &QListWidget::itemClicked, this, &MainWindow::onCardClicked);
     connect(btnPlay, &QPushButton::clicked, this, &MainWindow::onPlayClicked);
     connect(btnPass, &QPushButton::clicked, this, &MainWindow::onPassClicked);
+    connect(btnCheatWin, &QPushButton::clicked, this, [this]() {
+        if (judge && gameManager) {
+            // 假设人类玩家 ID 为 0
+            judge->debugDirectWin(0);
+
+            // 禁用按钮防止重复点击
+            btnCheatWin->setEnabled(false);
+            btnPlay->setEnabled(false);
+            btnPass->setEnabled(false);
+
+            lblStatus->setText("调试模式：你已强制获胜，等待 AI 结束...");
+        }
+    });
     connect(btnNewGame, &QPushButton::clicked, this, [this]() {
-        lblStatus->setText("正在开始新游戏...");
+        lblStatus->setText("正在初始化新游戏（级牌为2）...");
         if (humanPlayer) {
             humanPlayer->resetSelection();
         }
@@ -393,7 +414,8 @@ void MainWindow::setupConnections() {
             }
             listHuman->viewport()->update();
         }
-        QMetaObject::invokeMethod(gameManager, "startGame", Qt::QueuedConnection);
+        btnCheatWin->setEnabled(true);
+        QMetaObject::invokeMethod(gameManager, "startNewGame", Qt::QueuedConnection);
     });
     connect(judge, &Judge::lastPlayUpdated, this, [this](int playerId){
         Q_UNUSED(playerId);
@@ -409,7 +431,65 @@ void MainWindow::setupConnections() {
     // Judge 通知 UI 更新
     connect(judge, &Judge::playerHandChanged, this, &MainWindow::updateUI);
     //connect(judge, &Judge::lastPlayUpdated, this, &MainWindow::updateUI);
-    connect(judge, &Judge::gameFinished, this, &MainWindow::onGameFinished);
+    connect(btnNewGame, &QPushButton::clicked, this, [this]() {
+        lblStatus->setText("正在初始化新比赛(打2)...");
+        // ... (原有的清理UI逻辑) ...
+        QMetaObject::invokeMethod(gameManager, "startNewGame", Qt::QueuedConnection);
+    });
+
+    connect(judge, &Judge::gameFinished, this, [this]() {
+        QString msg = "=== 本局结束 ===\n\n";
+
+        // --- 新增代码开始：显示完赛顺序 ---
+        auto placements = judge->getPreviousPlacements();
+        if (!placements.empty()) {
+            msg += "【出牌顺序】\n";
+            for (size_t i = 0; i < placements.size(); ++i) {
+                int pid = placements[i];
+                QString name;
+
+                // 为了让显示更直观，区分人类和电脑
+                if (pid == 0) {
+                    name = "玩家0 (你)";
+                } else {
+                    name = QString("玩家%1 (电脑)").arg(pid);
+                }
+
+                msg += QString("第%1名: %2\n").arg(i + 1).arg(name);
+            }
+            msg += "\n";
+        }
+        // --- 新增代码结束 ---
+
+        // 显示等级信息
+        msg += QString("【当前战况】\n队伍0 (你 & P2)：Lv.%1\n队伍1 (P1 & P3)：Lv.%2")
+                   .arg(judge->getTeamLevel(0))
+                   .arg(judge->getTeamLevel(1));
+
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::question(this, "本局战报", msg + "\n\n是否继续下一局？",
+                                      QMessageBox::Yes | QMessageBox::No);
+
+        if (reply == QMessageBox::Yes) {
+            lblStatus->setText("正在开始下一局...");
+            if (humanPlayer) humanPlayer->resetSelection();
+
+            // 调用下一局逻辑（保留等级）
+            QTimer::singleShot(500, gameManager, &GameManager::startNextRound);
+        } else {
+            lblStatus->setText("游戏暂停，请点击“新游戏”重新开始");
+        }
+    });
+    connect(judge, &Judge::matchFinished, this, [this](int winningTeam) {
+        QString levelStr = (winningTeam == 0) ? "队伍0 (你)" : "队伍1 (AI)";
+        QString msg = QString("恭喜！%1 成功打过 A (14级)！\n获得最终胜利！").arg(levelStr);
+
+        QMessageBox::information(this, "最终冠军", msg);
+
+        lblStatus->setText("比赛结束，冠军：" + levelStr);
+        btnPlay->setEnabled(false);
+        btnPass->setEnabled(false);
+    });
     connect(judge, &Judge::turnChanged, this, &MainWindow::updateUI);
     // 连接清台信号
     connect(judge, &Judge::tableCleared, this, &MainWindow::updateUI);
@@ -621,34 +701,4 @@ void MainWindow::refreshSelectionSummary() {
     lblSelection->setText(QStringLiteral("已选中：%1 张 (%2)")
                               .arg(selected.size())
                               .arg(detail));
-}
-void MainWindow::onGameFinished() {
-    QString msg;
-    auto placements = judge->getPreviousPlacements();
-    if (!placements.empty()) {
-        QStringList order;
-        for (int pos = 0; pos < placements.size(); ++pos) {
-            order << QString("第%1名：玩家%2").arg(pos + 1).arg(placements[pos]);
-        }
-        msg = order.join("\n");
-    } else {
-        msg = "本局结束";
-    }
-    msg += QString("\n队伍0 等级：%1\n队伍1 等级：%2")
-               .arg(judge->getTeamLevel(0))
-               .arg(judge->getTeamLevel(1));
-    auto rankToString = [](int rank) -> QString {
-        switch (rank) {
-        case 11: return "J";
-        case 12: return "Q";
-        case 13: return "K";
-        case 14: return "A";
-        case 15: return "2";
-        default: return QString::number(rank);
-        }
-    };
-    msg += QString("\n本局级牌：♥%1（队伍%2）")
-               .arg(rankToString(judge->getCurrentLevelRank()))
-               .arg(judge->getCurrentLevelTeam());
-    QMessageBox::information(this, "游戏结束", msg);
 }

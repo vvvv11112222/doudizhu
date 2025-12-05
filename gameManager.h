@@ -21,7 +21,8 @@ public:
     Judge* getJudge();
     AIPlayer* getAIPlayer(int ID);
 public slots:
-    void startGame();
+    void startNewGame();    // 【修改】从打2开始的新游戏
+    void startNextRound();  // 【新增】保留等级，开始下一局
     void processNextTurn();
 
 signals:

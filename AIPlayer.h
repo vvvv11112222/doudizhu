@@ -6,13 +6,7 @@
 #include <random>
 #include "player.h"
 #include "card.h"
-enum class HandType {
-    Invalid = 0,
-    Single  = 1,
-    Pair    = 2,
-    Triple  = 3,
-    Bomb    = 4
-};
+#include "handmatcher.h"
 
 class AIPlayer : public QObject, public Player {
     Q_OBJECT

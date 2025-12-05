@@ -23,7 +23,7 @@ HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards) const {
     }
     if (cards.size() == 3) {
         if (cards[0].getRank() == cards[1].getRank() && cards[1].getRank() == cards[2].getRank())
-            return HandType::Triple;
+            return HandType::Trips;
         return HandType::Invalid;
     }
     // size >=4: could be bomb (4+ same rank) or three+single (4) or larger bombs
@@ -39,7 +39,7 @@ HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards) const {
         std::map<int,int> cnt;
         for (const auto &c : cards) cnt[c.getRankInt()]++;
         for (auto &kv : cnt) {
-            if (kv.second == 3) return HandType::Triple; // treat as triple-type for comparison
+            if (kv.second == 3) return HandType::Trips; // treat as triple-type for comparison
         }
     }
 
@@ -186,7 +186,7 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
         switch (t) {
         case HandType::Single: return 1;
         case HandType::Pair:   return 2;
-        case HandType::Triple: return 3;
+        case HandType::Trips: return 3;
         case HandType::Bomb:   return 4;
         default: return 0;
         }
