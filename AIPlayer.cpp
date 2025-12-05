@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <map>
+#include <set>
 #include <QTimer>
 #include <QDebug>
 
@@ -12,86 +13,51 @@ AIPlayer::AIPlayer(int id, const std::string& name, QObject* parent)
 {
 }
 
-// 判断牌型（支持：Single, Pair, Triple, Triple+Single (treated as size==4 but checked in isValidPlay),
-// Bomb（4+ same rank））
-HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards) const {
-    if (cards.empty()) return HandType::Invalid;
-    if (cards.size() == 1) return HandType::Single;
-    if (cards.size() == 2) {
-        if (cards[0].getRank() == cards[1].getRank()) return HandType::Pair;
-        return HandType::Invalid;
-    }
-    if (cards.size() == 3) {
-        if (cards[0].getRank() == cards[1].getRank() && cards[1].getRank() == cards[2].getRank())
-            return HandType::Trips;
-        return HandType::Invalid;
-    }
-    // size >=4: could be bomb (4+ same rank) or three+single (4) or larger bombs
-    // We'll treat 4+ same rank as Bomb
-    bool allSame = true;
-    for (const auto &c : cards) {
-        if (c.getRank() != cards[0].getRank()) { allSame = false; break; }
-    }
-    if (allSame && cards.size() >= 4) return HandType::Bomb;
-
-    // allow three+single detection: size == 4 and one rank appears 3 times
-    if (cards.size() == 4) {
-        std::map<int,int> cnt;
-        for (const auto &c : cards) cnt[c.getRankInt()]++;
-        for (auto &kv : cnt) {
-            if (kv.second == 3) return HandType::Trips; // treat as triple-type for comparison
-        }
-    }
-
-    return HandType::Invalid;
+HandType AIPlayer::evaluateHandType(const std::vector<Card>& cards, int levelRank) const {
+    HandMatcher matcher(cards, levelRank);
+    return matcher.analyze().type;
 }
 
 // 主值：返回用于比较同类牌大小的关键点（例如对子/单张等取 rank int）
-int AIPlayer::primaryRank(const std::vector<Card>& cards) const {
-    if (cards.empty()) return 0;
-    // For triples with extra cards (3+1), find the rank that appears majority
-    std::map<int,int> cnt;
-    for (const auto &c : cards) cnt[c.getRankInt()]++;
-    int bestRank = cards.front().getRankInt();
-    int bestCnt = 0;
-    for (auto &kv : cnt) {
-        if (kv.second > bestCnt) {
-            bestCnt = kv.second;
-            bestRank = kv.first;
-        }
-    }
-    return bestRank;
+int AIPlayer::primaryRank(const std::vector<Card>& cards, int levelRank) const {
+    HandMatcher matcher(cards, levelRank);
+    return matcher.analyze().primaryRank;
 }
 
 // 优化 canBeat 逻辑，防止 AI 试图用 3 张牌管 1 张牌等低级错误
-bool AIPlayer::canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base) const {
+bool AIPlayer::canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base, int levelRank) const {
     if (candidate.empty() || base.empty()) return false;
 
-    HandType tc = evaluateHandType(candidate);
-    HandType tb = evaluateHandType(base);
+    HandMatcher candMatcher(candidate, levelRank);
+    HandMatcher baseMatcher(base, levelRank);
 
-    if (tc == HandType::Invalid || tb == HandType::Invalid) return false;
+    PlayInfo candInfo = candMatcher.analyze();
+    PlayInfo baseInfo = baseMatcher.analyze();
 
-    // 1. 炸弹逻辑
-    if (tc == HandType::Bomb && tb != HandType::Bomb) return true;
-    if (tc != HandType::Bomb && tb == HandType::Bomb) return false;
-    if (tc == HandType::Bomb && tb == HandType::Bomb) {
-        // 炸弹比大小：先比张数，再比点数
-        if (candidate.size() > base.size()) return true;
-        if (candidate.size() < base.size()) return false;
-        return primaryRank(candidate) > primaryRank(base);
+    if (candInfo.type == HandType::Invalid || baseInfo.type == HandType::Invalid) return false;
+
+    // 1. 炸弹及天王炸逻辑
+    bool candBomb = candInfo.type == HandType::Bomb || candInfo.type == HandType::StraightFlush || candInfo.type == HandType::TianWang;
+    bool baseBomb = baseInfo.type == HandType::Bomb || baseInfo.type == HandType::StraightFlush || baseInfo.type == HandType::TianWang;
+
+    if (candBomb && !baseBomb) return true;
+    if (!candBomb && baseBomb) return false;
+    if (candBomb && baseBomb) {
+        if (candInfo.type != baseInfo.type) return static_cast<int>(candInfo.type) > static_cast<int>(baseInfo.type);
+        if (candInfo.size != baseInfo.size) return candInfo.size > baseInfo.size;
+        return candInfo.primaryRank > baseInfo.primaryRank;
     }
 
     // 2. 普通牌逻辑：必须【类型相同】且【张数相同】
-    if (tc != tb) return false;
+    if (candInfo.type != baseInfo.type) return false;
     if (candidate.size() != base.size()) return false;
 
-    return primaryRank(candidate) > primaryRank(base);
+    return candInfo.primaryRank > baseInfo.primaryRank;
 }
 
 // 生成可能出牌（单张 / 对子 / 三张 / 三带一 / 炸弹(4+)）
 // 返回 vector of candidate plays (each is vector<Card>)
-std::vector<std::vector<Card>> AIPlayer::generatePossiblePlays() const {
+std::vector<std::vector<Card>> AIPlayer::generatePossiblePlays(int levelRank) const {
     std::vector<std::vector<Card>> out;
     std::vector<Card> hand = getHandCopy();
 
@@ -147,13 +113,21 @@ std::vector<std::vector<Card>> AIPlayer::generatePossiblePlays() const {
         if (seen.insert(key).second) dedup.push_back(cand);
     }
 
-    return dedup;
+    // 过滤：仅保留 HandMatcher 认定的合法牌型
+    std::vector<std::vector<Card>> valid;
+    for (auto &cand : dedup) {
+        if (evaluateHandType(cand, levelRank) != HandType::Invalid) {
+            valid.push_back(cand);
+        }
+    }
+
+    return valid;
 }
 
 // 根据上家牌选择出牌：空 lastCards -> 随机选一个 possible play
 // 非空 -> 找出能压制上家的所有 candidate，返回最小能压制牌（保守策略）
-std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
-    auto possible = generatePossiblePlays();
+std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards, int levelRank) {
+    auto possible = generatePossiblePlays(levelRank);
     if (possible.empty()) return {};
 
     // shuffle possible a bit to avoid deterministic behaviour when choosing random
@@ -164,7 +138,7 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
         // try to select a non-bomb first
         std::vector<int> nonbomb_idxs;
         for (int i = 0; i < (int)possible.size(); ++i) {
-            if (evaluateHandType(possible[i]) != HandType::Bomb) nonbomb_idxs.push_back(i);
+            if (evaluateHandType(possible[i], levelRank) != HandType::Bomb) nonbomb_idxs.push_back(i);
         }
         if (!nonbomb_idxs.empty()) {
             std::uniform_int_distribution<int> dist(0, (int)nonbomb_idxs.size()-1);
@@ -177,7 +151,7 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
     // find beating candidates
     std::vector<std::vector<Card>> beating;
     for (auto &cand : possible) {
-        if (canBeat(cand, lastCards)) beating.push_back(cand);
+        if (canBeat(cand, lastCards, levelRank)) beating.push_back(cand);
     }
     if (beating.empty()) return {}; // pass
 
@@ -188,18 +162,20 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
         case HandType::Pair:   return 2;
         case HandType::Trips: return 3;
         case HandType::Bomb:   return 4;
+        case HandType::StraightFlush: return 5;
+        case HandType::TianWang: return 6;
         default: return 0;
         }
     };
 
     std::sort(beating.begin(), beating.end(), [&](const std::vector<Card>& a, const std::vector<Card>& b){
-        HandType ta = evaluateHandType(a);
-        HandType tb = evaluateHandType(b);
+        HandType ta = evaluateHandType(a, levelRank);
+        HandType tb = evaluateHandType(b, levelRank);
         int rta = rankForType(ta);
         int rtb = rankForType(tb);
         if (rta != rtb) return rta < rtb; // prefer weaker hand type
-        int ra = primaryRank(a);
-        int rb = primaryRank(b);
+        int ra = primaryRank(a, levelRank);
+        int rb = primaryRank(b, levelRank);
         if (ra != rb) return ra < rb;     // prefer smaller primary rank
         if (a.size() != b.size()) return a.size() < b.size();
         // fallback lexicographic by card string
@@ -213,11 +189,11 @@ std::vector<Card> AIPlayer::decideToMove(const std::vector<Card>& lastCards) {
 }
 
 // aiPlay slot: simulate think delay and then emit moveReady(selected) or passed()
-void AIPlayer::aiPlay(const std::vector<Card>& lastPlay) {
+void AIPlayer::aiPlay(const std::vector<Card>& lastPlay, int levelRank) {
     // schedule the decision after thinkDelayMs_ to simulate thinking
-    QTimer::singleShot(thinkDelayMs_, this, [this, lastPlay]() {
+    QTimer::singleShot(thinkDelayMs_, this, [this, lastPlay, levelRank]() {
         try {
-            std::vector<Card> chosen = decideToMove(lastPlay);
+            std::vector<Card> chosen = decideToMove(lastPlay, levelRank);
             if (chosen.empty()) {
                 emit passed();
             } else {

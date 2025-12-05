@@ -13,17 +13,17 @@ class AIPlayer : public QObject, public Player {
 public:
     explicit AIPlayer(int id, const std::string& name = "AI", QObject* parent = nullptr);
     ~AIPlayer() override = default;
-    // 方法1：判断牌型
-    HandType evaluateHandType(const std::vector<Card>& cards) const;
+    // 方法1：判断牌型（使用 HandMatcher）
+    HandType evaluateHandType(const std::vector<Card>& cards, int levelRank) const;
 
-    // 方法2：生成当前手牌的所有可能出牌（单张、对子、炸弹）
-    std::vector<std::vector<Card>> generatePossiblePlays() const;
+    // 方法2：生成当前手牌的所有可能出牌（仅保留 HandMatcher 认定的合法牌型）
+    std::vector<std::vector<Card>> generatePossiblePlays(int levelRank) const;
 
     // 方法3：根据上家牌选择出牌（空表示过）
-    std::vector<Card> decideToMove(const std::vector<Card>& lastCards);
+    std::vector<Card> decideToMove(const std::vector<Card>& lastCards, int levelRank);
 public slots:
 
-    void aiPlay(const std::vector<Card>& lastPlay);
+    void aiPlay(const std::vector<Card>& lastPlay, int levelRank);
 
 signals:
     // 与 HumanPlayer 相同的外部接口，交给 GameManager/Judge 处理
@@ -33,10 +33,10 @@ signals:
 
 private:
     // 辅助：得到牌型的主值（用于比较，例如对子/炸弹的点数）
-    int primaryRank(const std::vector<Card>& cards) const;
+    int primaryRank(const std::vector<Card>& cards, int levelRank) const;
 
     // 辅助：判断 candidate 能否压制 base（上家）
-    bool canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base) const;
+    bool canBeat(const std::vector<Card>& candidate, const std::vector<Card>& base, int levelRank) const;
 
     // 用于随机选择
     mutable std::mt19937 rng_;

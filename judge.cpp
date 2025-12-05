@@ -613,7 +613,7 @@ void Judge::aiPlay() {
     AIPlayer* ai = dynamic_cast<AIPlayer*>(players[currentTurn]);
     if (!ai) { nextTurn(); return; }
 
-    std::vector<Card> chosen = ai->decideToMove(lastCards);
+    std::vector<Card> chosen = ai->decideToMove(lastCards, getCurrentLevelRank());
     if (chosen.empty()) {
         // pass
          qInfo() << "AI" << currentTurn << "选择过牌";
