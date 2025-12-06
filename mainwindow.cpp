@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <QLineEdit>
 #include <QInputDialog>
+#include <QGraphicsDropShadowEffect>
 // 放在 mainwindow.cpp 顶部
 
 // mainwindow.cpp 顶部的 CardDelegate 类
@@ -150,6 +151,19 @@ void MainWindow::setupUI()
     QWidget *central = new QWidget(this);
     setCentralWidget(central);
 
+    QFrame *infoBar = new QFrame;
+    infoBar->setObjectName("infoBar");
+    QHBoxLayout *infoLayout = new QHBoxLayout(infoBar);
+    infoLayout->setContentsMargins(16, 10, 16, 10);
+    infoLayout->setSpacing(18);
+
+    QLabel *titleLabel = new QLabel("掼蛋欢乐桌");
+    titleLabel->setObjectName("titleLabel");
+
+    QLabel *coinBadge = new QLabel("🪙 金币 x 9999");
+    coinBadge->setObjectName("coinBadge");
+    coinBadge->setAlignment(Qt::AlignCenter);
+
     listAI1 = new QListWidget;
     listAI2 = new QListWidget;
     listAI3 = new QListWidget;
@@ -162,6 +176,14 @@ void MainWindow::setupUI()
     lblStatus = new QLabel("游戏状态：等待开始");
     lblLevels = new QLabel("队伍等级：-- / --");
     lblLevelCard = new QLabel("本局级牌：待定");
+
+    infoLayout->addWidget(titleLabel, 0, Qt::AlignVCenter);
+    infoLayout->addWidget(lblStatus, 0, Qt::AlignVCenter);
+    infoLayout->addWidget(lblLastPlay, 0, Qt::AlignVCenter);
+    infoLayout->addWidget(lblLevels, 0, Qt::AlignVCenter);
+    infoLayout->addWidget(lblLevelCard, 0, Qt::AlignVCenter);
+    infoLayout->addStretch();
+    infoLayout->addWidget(coinBadge, 0, Qt::AlignVCenter);
     lblSelection = new QLabel("已选中：0 张 (无)");
     btnNewGame = new QPushButton("新游戏");
     btnPlay = new QPushButton("出牌");
@@ -287,8 +309,17 @@ void MainWindow::setupUI()
     // --- 布局：带面板的 3x3 中心区域，外加独立的手牌区域 ---
     QVBoxLayout *mainLay = new QVBoxLayout;
 
+    auto applyShadow = [](QWidget *w) {
+        QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(w);
+        shadow->setBlurRadius(20);
+        shadow->setColor(QColor(0, 0, 0, 120));
+        shadow->setOffset(0, 6);
+        w->setGraphicsEffect(shadow);
+    };
+
     QFrame *boardFrame = new QFrame;
     boardFrame->setObjectName("boardFrame");
+    applyShadow(boardFrame);
     QGridLayout *boardGrid = new QGridLayout(boardFrame);
     boardGrid->setContentsMargins(16, 12, 16, 12);
     boardGrid->setHorizontalSpacing(20);
@@ -324,6 +355,7 @@ void MainWindow::setupUI()
 
     QFrame *handFrame = new QFrame;
     handFrame->setObjectName("handFrame");
+    applyShadow(handFrame);
     QVBoxLayout *handLayout = new QVBoxLayout(handFrame);
     handLayout->setContentsMargins(16, 12, 16, 12);
     handLayout->setSpacing(8);
@@ -354,6 +386,9 @@ void MainWindow::setupUI()
     buttons->addWidget(btnCheatWin);
     buttons->addWidget(btnDebugOrder);
 
+    applyShadow(infoBar);
+
+    mainLay->addWidget(infoBar);
     mainLay->addWidget(boardFrame);
     mainLay->addWidget(handFrame);
     mainLay->addLayout(buttons);
@@ -405,33 +440,52 @@ void MainWindow::setupUI()
 
     // 2. 全局 QSS 样式表
     QString qss = R"(
-        /* 全局背景：深绿色牌桌风格 */
+        /* 全局背景：明亮绿色牌桌 + 律动渐变光 */
         QMainWindow {
-            background-color: #2E5C38; /* 经典牌桌绿 */
-            background-image: url(:/images/table_bg.png); /* 如果你有纹理图最好 */
+            background: qradialgradient(spread:pad, cx:0.5, cy:0.35, radius:0.7, fx:0.5, fy:0.35,
+                stop:0 rgba(90, 200, 140, 0.32), stop:1 rgba(20, 70, 40, 0.95));
         }
 
-        /* 标签文字：白色、加粗、投影 */
+        /* 顶部信息条：半透明磨砂 + 光带描边 */
+        QFrame#infoBar {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(255,255,255,0.16), stop:1 rgba(255,255,255,0.08));
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 16px;
+        }
+
         QLabel {
-            color: #FFFFFF;
+            color: #FDFDFD;
             font-family: "Microsoft YaHei";
             font-size: 14px;
-            font-weight: bold;
+            font-weight: 600;
         }
 
-        /* 列表控件：透明背景，无边框 */
+        QLabel#titleLabel {
+            font-size: 18px;
+            letter-spacing: 1px;
+            color: #F9E79F;
+        }
+
+        QLabel#coinBadge {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFD26F, stop:1 #FF9A3C);
+            color: #5A2E00;
+            padding: 8px 14px;
+            border-radius: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.55);
+            font-weight: 800;
+        }
+
         QListWidget {
             background-color: transparent;
             border: none;
-            outline: none; /* 去掉选中时的虚线框 */
+            outline: none;
         }
 
-        /* 手牌与出牌区域的面板背景 */
         QFrame#boardFrame, QFrame#handFrame {
-            background-color: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 14px;
-            padding: 8px;
+            background: rgba(10, 40, 24, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 16px;
+            padding: 10px;
         }
 
         QScrollArea {
@@ -439,45 +493,41 @@ void MainWindow::setupUI()
             border: none;
         }
 
-        /* 按钮通用风格：橙色渐变，圆角 */
+        /* 按钮：高光胶囊风格 */
         QPushButton {
-            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFD700, stop:1 #FF8C00);
-            border: 2px solid #B8860B;
-            border-radius: 15px;
-            color: #552200;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFD05A, stop:1 #FF9C2D);
+            border: 2px solid #C9780F;
+            border-radius: 18px;
+            color: #4A2500;
             font-family: "SimHei";
             font-size: 16px;
-            font-weight: bold;
-            padding: 5px 15px;
-            min-width: 80px;
-            min-height: 30px;
+            font-weight: 700;
+            padding: 8px 18px;
+            min-width: 90px;
+            min-height: 34px;
         }
-        /* 按钮悬停 */
         QPushButton:hover {
-            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFE44D, stop:1 #FF9F33);
-            margin-top: 2px; /* 模拟按压前的浮动感 */
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #FFE07A, stop:1 #FFB347);
+            margin-top: -1px;
         }
-        /* 按钮按下 */
         QPushButton:pressed {
-            background-color: #E67E22;
+            background-color: #E98C24;
             border-style: inset;
-            margin-top: 4px;
+            margin-top: 1px;
         }
-        /* 禁用状态：灰色 */
         QPushButton:disabled {
-            background-color: #7F8C8D;
-            border-color: #555;
-            color: #DDD;
+            background-color: #6C7A7D;
+            border-color: #4C5658;
+            color: #DCDCDC;
         }
 
-        /* 特殊按钮颜色：不要/过 (蓝色系) */
         QPushButton#btnPass {
-            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3498DB, stop:1 #2980B9);
-            border-color: #1F618D;
-            color: white;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38D5F4, stop:1 #0FB6C6);
+            border-color: #0F92A8;
+            color: #083A42;
         }
         QPushButton#btnPass:hover {
-             background-color: #5DADE2;
+            background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #66E4FF, stop:1 #1FC9D9);
         }
     )";
 
