@@ -31,15 +31,7 @@ AIPlayer* GameManager::getAIPlayer(int ID){
         return aiPlayer3;
     }
 }
-void GameManager::initTurnQueue() {
-    turnQueue_.clear();
 
-    for (int i = 0; i < players_.size(); ++i) {
-        turnQueue_.push_back(i);
-    }
-
-    emit turnQueueUpdated();
-}
 void GameManager::startNextRound() {
     // 1. 清理手牌
     for (auto& player : players_) {
@@ -59,14 +51,8 @@ void GameManager::startNextRound() {
         emit playerDealt(i);
     }
 
-    // 4. 进贡逻辑（如果是第二局及以上，Judge会自动处理）
-    judge_->applyTributeAndReturn();
-
     emit gameStarted();
-
-    // 5. 初始化出牌队列并开始
-    initTurnQueue();
-    judge_->beginFirstTurn();
+    judge_->startTributePhase();
 }
 void GameManager::startNewGame() {
     if (judge_) {
@@ -74,26 +60,5 @@ void GameManager::startNewGame() {
     }
     startNextRound();
 }
-void GameManager::processNextTurn() {
-    if (turnQueue_.empty()) return;
 
-    int currentId = turnQueue_.front();
-
-    turnQueue_.pop_front();
-    turnQueue_.push_back(currentId);
-
-    judge_->setCurrentTurn(currentId);
-
-    Player* currentPlayer = players_[currentId];
-    if (auto ai = dynamic_cast<AIPlayer*>(currentPlayer)) {
-        // --- AI 出牌 ---
-        std::vector<Card> aiChoice = ai->decideToMove(judge_->getLastCards());
-        judge_->playAICards(currentId, aiChoice);
-
-    } else if (auto human = dynamic_cast<HumanPlayer*>(currentPlayer)) {
-        // --- 人类玩家出牌 ---
-        // 通知 UI：该玩家可以出牌
-        emit judge_->playerTurnStart(currentId);
-    }
-}
 

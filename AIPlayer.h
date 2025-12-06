@@ -30,7 +30,6 @@ signals:
     // 与 HumanPlayer 相同的外部接口，交给 GameManager/Judge 处理
     void moveReady(const std::vector<Card>& cards); // 候选出牌
     void passed();                                  // AI 选择过
-    void invalidMove(const QString& reason);        // （可选）用于调试或日志
 
 private:
     // 辅助：得到牌型的主值（用于比较，例如对子/炸弹的点数）

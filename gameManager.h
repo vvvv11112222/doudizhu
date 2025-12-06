@@ -6,7 +6,6 @@
 #include <QVector>
 #include "deck.h"
 #include "player.h"
-#include <deque>
 #include "AIPlayer.h"
 #include "humanPlayer.h"
 #include "judge.h"
@@ -16,20 +15,17 @@ class GameManager : public QObject {
 public:
     explicit GameManager(QObject* parent = nullptr);
     void setPlayers();
-    void initTurnQueue();
     HumanPlayer* getHumanPlayer();
     Judge* getJudge();
     AIPlayer* getAIPlayer(int ID);
 public slots:
     void startNewGame();    // 【修改】从打2开始的新游戏
     void startNextRound();  // 【新增】保留等级，开始下一局
-    void processNextTurn();
 
 signals:
     void gameStarted();
     void playerDealt(int playerId);
     void gameFinished();
-    void turnQueueUpdated();
 
 private:
     Deck deck_;
@@ -40,7 +36,6 @@ private:
     AIPlayer * aiPlayer3;
 
     Judge* judge_;
-    std::deque<int> turnQueue_;
 };
 
 #endif

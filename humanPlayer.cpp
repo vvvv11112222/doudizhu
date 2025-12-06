@@ -10,7 +10,6 @@ HumanPlayer::HumanPlayer(int id, const std::string& name, QObject* parent)
 
 void HumanPlayer::requestMove(const std::vector<Card>& lastPlay)
 {
-    emit showHandRequested(ID, handCards, lastPlay);
     selectedIndices_.clear();
 }
 
@@ -54,11 +53,6 @@ void HumanPlayer::onUserPass()
     emit passed();
 }
 
-// 用户请求提示（UI 点击“提示”）
-void HumanPlayer::onUserRequestHint()
-{
-    emit requestHintFromJudge(ID);
-}
 
 std::vector<Card> HumanPlayer::getHandCopy() const
 {

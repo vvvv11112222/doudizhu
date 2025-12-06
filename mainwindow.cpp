@@ -9,6 +9,8 @@
 #include <QStringList>
 #include <algorithm>
 #include <QTimer>
+#include <QLineEdit>
+#include <QInputDialog>
 // 放在 mainwindow.cpp 顶部
 
 // mainwindow.cpp 顶部的 CardDelegate 类
@@ -163,7 +165,61 @@ void MainWindow::setupUI()
         "QPushButton:hover { background-color: #9B59B6; }"
         "QPushButton:pressed { background-color: #71368A; }"
         );
+    btnDebugOrder = new QPushButton("测试：指定排名结算");
+    btnDebugOrder->setStyleSheet(
+        "QPushButton { background-color: #2E86C1; color: white; border-radius: 15px; font-weight: bold; padding: 5px; }"
+        "QPushButton:hover { background-color: #3498DB; }"
+        );
+    connect(btnDebugOrder, &QPushButton::clicked, this, [this]() {
+        if (!judge || !gameManager) return;
 
+        // 1. 弹出输入框
+        bool ok;
+        QString text = QInputDialog::getText(this, "指定完赛顺序",
+                                             "请输入4个玩家ID (0-3)，用空格隔开\n"
+                                             "例如: 0 2 1 3 (表示你自己第一，队友第二)",
+                                             QLineEdit::Normal,
+                                             "0 2 1 3", &ok);
+        if (!ok || text.isEmpty()) return;
+
+        // 2. 解析输入的字符串
+        QStringList parts = text.split(" ", Qt::SkipEmptyParts);
+        std::vector<int> order;
+        std::set<int> checkDup; // 用于检查重复
+
+        bool parseError = false;
+        if (parts.size() != 4) parseError = true;
+
+        for (const QString& s : parts) {
+            bool isInt;
+            int id = s.toInt(&isInt);
+            if (!isInt || id < 0 || id > 3 || checkDup.count(id)) {
+                parseError = true;
+                break;
+            }
+            order.push_back(id);
+            checkDup.insert(id);
+        }
+
+        if (parseError) {
+            QMessageBox::warning(this, "输入错误", "请输入 0, 1, 2, 3 四个不重复的数字，用空格隔开！");
+            return;
+        }
+
+        // 3. 调用 Judge 接口强制结算
+        judge->debugSimulateGameEnd(order);
+
+        // 注意：
+        // 调用 debugSimulateGameEnd 后，Judge 会发出 gameFinished 信号。
+        // 你在 setupConnections 里已经连接了 gameFinished 信号到弹窗逻辑。
+        // 所以此时会自动弹出 "本局战报...是否继续下一局" 的对话框。
+        // 点击 "Yes" 即可开启下一轮。
+
+        // 如果你想跳过那个对话框直接开始下一局，可以将下面的代码解开注释：
+        /*
+    QTimer::singleShot(500, gameManager, &GameManager::startNextRound);
+    */
+    });
     btnPlay->setEnabled(false);
     btnPass->setEnabled(false);
 
@@ -256,6 +312,7 @@ void MainWindow::setupUI()
     buttons->addWidget(btnPlay);
     buttons->addWidget(btnPass);
     buttons->addWidget(btnCheatWin);
+    buttons->addWidget(btnDebugOrder);
 
     mainLay->addLayout(rowTop);
     mainLay->addLayout(rowMiddle);
@@ -387,8 +444,27 @@ void MainWindow::setupConnections() {
     connect(listHuman, &QListWidget::itemClicked, this, &MainWindow::onCardClicked);
     connect(btnPlay, &QPushButton::clicked, this, &MainWindow::onPlayClicked);
     connect(btnPass, &QPushButton::clicked, this, &MainWindow::onPassClicked);
+    // connect(btnCheatWin, &QPushButton::clicked, this, [this]() {
+    //     if (judge && gameManager) {
+    //         // 假设人类玩家 ID 为 0
+    //         judge->debugDirectWin(0);
+
+    //         // 禁用按钮防止重复点击
+    //         btnCheatWin->setEnabled(false);
+    //         btnPlay->setEnabled(false);
+    //         btnPass->setEnabled(false);
+
+    //         lblStatus->setText("调试模式：你已强制获胜，等待 AI 结束...");
+    //     }
+    // });
     connect(btnCheatWin, &QPushButton::clicked, this, [this]() {
         if (judge && gameManager) {
+            // === 新增测试逻辑开始 ===
+            // 强制将 队伍0 (你和P2) 的等级设为 13 (即打K)
+            // 这样只要赢了这一局，等级就会 >= 14 (A)，触发 matchFinished
+            judge->debugSetLevel(0, 13);
+            // === 新增测试逻辑结束 ===
+
             // 假设人类玩家 ID 为 0
             judge->debugDirectWin(0);
 
@@ -397,7 +473,7 @@ void MainWindow::setupConnections() {
             btnPlay->setEnabled(false);
             btnPass->setEnabled(false);
 
-            lblStatus->setText("调试模式：你已强制获胜，等待 AI 结束...");
+            lblStatus->setText("调试模式：已强制设为Lv.13并获胜，等待结算...");
         }
     });
     connect(btnNewGame, &QPushButton::clicked, this, [this]() {
@@ -499,6 +575,38 @@ void MainWindow::setupConnections() {
     // 确保其他信号也连接了
     connect(judge, &Judge::lastPlayUpdated, this, &MainWindow::updateUI); // 这里不再需要 lambda 参数，全量刷新虽然浪费一点但逻辑最稳
     connect(judge, &Judge::turnChanged, this, &MainWindow::updateUI);
+    connect(judge, &Judge::askForTribute, this, [this](int playerId, bool isReturn) {
+        if (playerId != 0) return; // 只处理人类
+
+        QString title = isReturn ? "请还贡" : "请进贡";
+        QString msg = isReturn ? "请选择一张牌还给进贡者（任意牌）"
+                               : "请选择你手中最大的牌进贡（红桃级牌除外）";
+
+        lblStatus->setText(title + "：" + msg);
+
+        // 启用交互，但修改按钮文字
+        btnPlay->setText("确认选择");
+        btnPlay->setEnabled(true);
+        btnPass->setEnabled(false); // 进贡/还贡不能跳过
+
+        // 清空上次选择
+        humanPlayer->resetSelection();
+        refreshSelectionSummary();
+    });
+
+    connect(judge, &Judge::tributeResult, this, [this](int payer, int receiver, const Card& card, bool isReturn) {
+        QString action = isReturn ? "还贡" : "进贡";
+        QString msg = QString("玩家 %1 向 玩家 %2 %3了一张： %4")
+                          .arg(payer).arg(receiver).arg(action)
+                          .arg(QString::fromStdString(card.toString()));
+
+        QMessageBox::information(this, "进贡通知", msg);
+        updateUI(); // 刷新手牌显示
+    });
+
+    connect(judge, &Judge::tributeResisted, this, [this](int playerId) {
+        QMessageBox::information(this, "抗贡", QString("玩家 %1 拥有双大王，触发抗贡！").arg(playerId));
+    });
 }
 void MainWindow::onCardClicked(QListWidgetItem *item) {
     if (!humanPlayer) return;
@@ -540,6 +648,28 @@ void MainWindow::onSelectionChanged() {
 }
 
 void MainWindow::onPlayClicked() {
+    if (!humanPlayer || !judge) return;
+
+    // --- 新增：进贡阶段处理 ---
+    if (judge->getGamePhase() != GamePhase::Playing) {
+        auto cards = humanPlayer->getSelectedCards();
+        if (cards.size() != 1) {
+            QMessageBox::warning(this, "提示", "进贡/还贡只能选择一张牌！");
+            return;
+        }
+
+        // 提交给 Judge
+        bool ok = judge->submitTribute(0, cards[0]);
+        if (ok) {
+            humanPlayer->resetSelection();
+            btnPlay->setText("出牌"); // 恢复按钮文字（虽然马上会被禁用）
+            btnPlay->setEnabled(false);
+            lblStatus->setText("等待其他玩家...");
+        } else {
+            QMessageBox::warning(this, "错误", "选择的牌不符合进贡规则（必须是最大的牌）");
+        }
+        return;
+    }
     if (!humanPlayer || !judge) return;
     if (judge->getCurrentTurn() != 0) {
         QMessageBox::information(this, "提示", "现在还没轮到你出牌");

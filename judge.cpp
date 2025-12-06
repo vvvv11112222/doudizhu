@@ -113,246 +113,6 @@ void Judge::beginFirstTurn() {
     }
 }
 
-
-// static PlayInfo analyzePlay(const std::vector<Card>& cards, int levelRank) {
-//     PlayInfo info;
-//     info.size = static_cast<int>(cards.size());
-//     if (cards.empty()) return info;
-
-//     // 预处理：统计非红桃级牌的数量，红桃级牌作为通配符使用
-//     std::map<int, int> rankCount;
-//     int heartLevelWild = 0;
-//     for (const auto& c : cards) {
-//         if (isHeartLevelWildcard(c, levelRank)) {
-//             ++heartLevelWild;
-//             continue;
-//         }
-//         rankCount[logicalRank(c)]++;
-//     }
-
-//     // 天王炸：2张大王 + 2张小王
-//     if (cards.size() == 4) {
-//         int smallJ = 0, bigJ = 0;
-//         for (const auto& c : cards) {
-//             if (c.getRank() == Rank::S) smallJ++;
-//             else if (c.getRank() == Rank::B) bigJ++;
-//         }
-//         if (smallJ == 2 && bigJ == 2) {
-//             info.type = PlayType::TianWang;
-//             info.primaryRank = orderValue(16, levelRank);
-//             return info;
-//         }
-//     }
-
-//     // 炸弹：4 张及以上相同点数（红桃级牌可补齐，不能替换大小王）
-//     if (cards.size() >= 4 && rankCount.size() <= 1) {
-//         int targetRank = rankCount.empty() ? levelRank : rankCount.begin()->first;
-//         int available = (rankCount.empty() ? 0 : rankCount.begin()->second) + heartLevelWild;
-//         bool hasOnlyAllowed = true;
-//         if (!rankCount.empty()) {
-//             for (const auto& kv : rankCount) {
-//                 if (kv.first != targetRank) { hasOnlyAllowed = false; break; }
-//             }
-//         }
-//         if (hasOnlyAllowed && available == static_cast<int>(cards.size()) && targetRank < 15) {
-//             info.type = PlayType::Bomb;
-//             info.primaryRank = orderValue(targetRank, levelRank);
-//             info.size = static_cast<int>(cards.size());
-//             return info;
-//         }
-//     }
-
-//     auto isAllSameSuit = [&](Suit target) {
-//         for (const auto& c : cards) {
-//             if (isHeartLevelWildcard(c, levelRank)) continue; // 通配符可视作任意花色
-//             if (c.getSuit() != target) return false;
-//         }
-//         return true;
-//     };
-
-//     // 同花顺炸弹：必须 5 张，同花且顺子，红桃级牌可补 rank 或花色
-//     if (cards.size() == 5) {
-//         for (auto candidateSuit : {Suit::Spades, Suit::Clubs, Suit::Diamonds, Suit::Hearts}) {
-//             if (!isAllSameSuit(candidateSuit)) continue;
-
-//             std::vector<int> existingRanks;
-//             for (const auto& c : cards) {
-//                 if (isHeartLevelWildcard(c, levelRank)) continue;
-//                 int r = logicalRank(c);
-//                 if (r >= 15) { existingRanks.clear(); break; }
-//                 existingRanks.push_back(r);
-//             }
-//             if (existingRanks.empty() && heartLevelWild == 0) continue;
-//             std::sort(existingRanks.begin(), existingRanks.end());
-//             existingRanks.erase(std::unique(existingRanks.begin(), existingRanks.end()), existingRanks.end());
-//             auto fitsStraight = [&](int startRank) {
-//                 std::vector<int> need;
-//                 for (int i = 0; i < 5; ++i) need.push_back(startRank + i);
-//                 std::set<int> needSet(need.begin(), need.end());
-//                 for (int r : existingRanks) {
-//                     if (needSet.count(r) == 0) return false;
-//                     needSet.erase(r);
-//                 }
-//                 return static_cast<int>(needSet.size()) <= heartLevelWild;
-//             };
-//             for (int start = 3; start <= 10; ++start) { // 3..A
-//                 if (fitsStraight(start)) {
-//                     info.type = PlayType::StraightFlush;
-//                     info.primaryRank = orderValue(start + 4, levelRank);
-//                     info.isStraightFlush = true;
-//                     return info;
-//                 }
-//             }
-//         }
-//     }
-
-//     if (cards.size() == 1) {
-//         int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
-//         info.type = PlayType::Single;
-//         info.primaryRank = orderValue(rankV, levelRank);
-//         return info;
-//     }
-
-//     if (cards.size() == 2 && rankCount.size() <= 1) {
-//         int count = rankCount.empty() ? 0 : rankCount.begin()->second;
-//         if (count + heartLevelWild == 2) {
-//             int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
-//             info.type = PlayType::Pair;
-//             info.primaryRank = orderValue(rankV, levelRank);
-//             return info;
-//         }
-//     }
-
-//     if (cards.size() == 3 && rankCount.size() <= 1) {
-//         int count = rankCount.empty() ? 0 : rankCount.begin()->second;
-//         if (count + heartLevelWild == 3) {
-//             int rankV = rankCount.empty() ? levelRank : rankCount.begin()->first;
-//             info.type = PlayType::Trips;
-//             info.primaryRank = orderValue(rankV, levelRank);
-//             return info;
-//         }
-//     }
-
-//     // 三带二
-//     if (cards.size() == 5 && rankCount.size() <= 2) {
-//         std::vector<int> candidateTripRanks;
-//         for (const auto& kv : rankCount) candidateTripRanks.push_back(kv.first);
-//         if (std::find(candidateTripRanks.begin(), candidateTripRanks.end(), levelRank) == candidateTripRanks.end()) {
-//             candidateTripRanks.push_back(levelRank);
-//         }
-//         for (int tripRank : candidateTripRanks) {
-//             int tripCount = rankCount.count(tripRank) ? rankCount.at(tripRank) : 0;
-//             int wildLeft = heartLevelWild - std::max(0, 3 - tripCount);
-//             if (wildLeft < 0) continue;
-
-//             // 余下牌必须组成对子
-//             std::map<int, int> rest = rankCount;
-//             rest.erase(tripRank);
-//             if (rest.size() > 1) continue;
-//             int pairRank = rest.empty() ? levelRank : rest.begin()->first;
-//             if (pairRank == tripRank) continue;
-//             int pairCount = rest.empty() ? 0 : rest.begin()->second;
-//             if (pairCount > 2) continue;
-//             if (pairCount + wildLeft == 2) {
-//                 info.type = PlayType::TripsWithPair;
-//                 info.primaryRank = orderValue(tripRank, levelRank);
-//                 return info;
-//             }
-//         }
-//     }
-
-//     // 三连对（3 组点数相邻的对子），红桃级牌可补齐对子
-//     if (cards.size() == 6 && rankCount.size() <= 3) {
-//         for (int start = 3; start <= 12; ++start) { // 最多到 Q 作为起点
-//             std::vector<int> need = {start, start + 1, start + 2};
-//             int wildLeft = heartLevelWild;
-//             bool ok = true;
-//             for (int r : need) {
-//                 int cnt = rankCount.count(r) ? rankCount.at(r) : 0;
-//                 if (cnt > 2) { ok = false; break; }
-//                 if (cnt < 2) wildLeft -= (2 - cnt);
-//                 if (wildLeft < 0) { ok = false; break; }
-//             }
-//             if (!ok) continue;
-//             // 确保没有其他无关 rank
-//             int used = 0;
-//             for (int r : need) used += rankCount.count(r) ? rankCount.at(r) : 0;
-//             int extra = 0;
-//             for (const auto& kv : rankCount) {
-//                 if (std::find(need.begin(), need.end(), kv.first) == need.end()) extra += kv.second;
-//             }
-//             if (used + extra != static_cast<int>(cards.size() - heartLevelWild)) continue;
-//             if (extra == 0) {
-//                 info.type = PlayType::TriplePairs;
-//                 info.primaryRank = orderValue(start + 2, levelRank);
-//                 return info;
-//             }
-//         }
-//     }
-
-//     // 钢板：2 组相邻的三张牌，红桃级牌可补齐三张
-//     if (cards.size() == 6 && rankCount.size() <= 2) {
-//         for (int start = 3; start <= 13; ++start) { // 到 K 作为起点
-//             std::vector<int> need = {start, start + 1};
-//             int wildLeft = heartLevelWild;
-//             bool ok = true;
-//             for (int r : need) {
-//                 int cnt = rankCount.count(r) ? rankCount.at(r) : 0;
-//                 if (cnt > 3) { ok = false; break; }
-//                 if (cnt < 3) wildLeft -= (3 - cnt);
-//                 if (wildLeft < 0) { ok = false; break; }
-//             }
-//             if (!ok) continue;
-//             int used = 0;
-//             for (int r : need) used += rankCount.count(r) ? rankCount.at(r) : 0;
-//             int extra = 0;
-//             for (const auto& kv : rankCount) {
-//                 if (std::find(need.begin(), need.end(), kv.first) == need.end()) extra += kv.second;
-//             }
-//             if (used + extra != static_cast<int>(cards.size() - heartLevelWild)) continue;
-//             if (extra == 0) {
-//                 info.type = PlayType::SteelPlate;
-//                 info.primaryRank = orderValue(start + 1, levelRank);
-//                 return info;
-//             }
-//         }
-//     }
-
-//     // 顺子（5 张，且不含 2 和大小王，A 只能在开头/结尾），红桃级牌可补齐缺牌
-//     if (cards.size() == 5) {
-//         auto containsInvalid = [&](const Card& c){ return c.getRank() == Rank::Two || c.getRank() == Rank::S || c.getRank() == Rank::B; };
-//         bool invalidRank = std::any_of(cards.begin(), cards.end(), containsInvalid);
-//         if (!invalidRank) {
-//             std::vector<int> ranks;
-//             for (const auto& c : cards) {
-//                 if (isHeartLevelWildcard(c, levelRank)) continue;
-//                 ranks.push_back(logicalRank(c));
-//             }
-//             std::sort(ranks.begin(), ranks.end());
-//             ranks.erase(std::unique(ranks.begin(), ranks.end()), ranks.end());
-//             auto fitsStraight = [&](int startRank) {
-//                 std::vector<int> need;
-//                 for (int i = 0; i < 5; ++i) need.push_back(startRank + i);
-//                 std::set<int> needSet(need.begin(), need.end());
-//                 for (int r : ranks) {
-//                     if (needSet.count(r) == 0) return false;
-//                     needSet.erase(r);
-//                 }
-//                 return static_cast<int>(needSet.size()) <= heartLevelWild;
-//             };
-//             for (int start = 3; start <= 10; ++start) { // 3..A
-//                 if (fitsStraight(start)) {
-//                     info.type = PlayType::Straight;
-//                     info.primaryRank = orderValue(start + 4, levelRank);
-//                     return info;
-//                 }
-//             }
-//         }
-//     }
-
-//     return info;
-// }
-
 static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& last, int levelRank) {
     if (last.empty()) {
         HandMatcher matcher(current, levelRank);
@@ -725,82 +485,6 @@ void Judge::finalizeGame() {
     }
 }
 
-// Card Judge::pickTributeCard(Player* donor) const {
-//     Card best;
-//     auto hand = donor->getHandCopy();
-//     int levelRank = getCurrentLevelRank();
-//     std::sort(hand.begin(), hand.end(), [levelRank](const Card& a, const Card& b){
-//         int av = orderValue(logicalRank(a), levelRank);
-//         int bv = orderValue(logicalRank(b), levelRank);
-//         if (av != bv) return av > bv;
-//         return static_cast<int>(a.getSuit()) > static_cast<int>(b.getSuit());
-//     });
-//     int forbiddenRank = teamLevels[donor->getID() % 2];
-//     for (const auto& c : hand) {
-//         if (c.getSuit() == Suit::Hearts && logicalRank(c) == forbiddenRank) {
-//             continue;
-//         }
-//         best = c;
-//         break;
-//     }
-//     return best;
-// }
-
-// Card Judge::pickReturnCard(Player* winner) const {
-//     Card chosen;
-//     auto hand = winner->getHandCopy();
-//     int levelRank = getCurrentLevelRank();
-//     std::sort(hand.begin(), hand.end(), [levelRank](const Card& a, const Card& b){
-//         int av = orderValue(logicalRank(a), levelRank);
-//         int bv = orderValue(logicalRank(b), levelRank);
-//         if (av != bv) return av < bv;
-//         return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
-//     });
-//     for (const auto& c : hand) {
-//         if (logicalRank(c) <= 10) { chosen = c; break; }
-//     }
-//     return chosen;
-// }
-
-void Judge::applyTributeAndReturn() {
-    if (!tributePending || previousPlacements.empty()) return;
-    int winner = previousPlacements.front();
-    int loser = previousPlacements.back();
-    if (previousPlacements.size() == players.size() - 1) {
-        for (int i = 0; i < static_cast<int>(players.size()); ++i) {
-            if (std::find(previousPlacements.begin(), previousPlacements.end(), i) == previousPlacements.end()) {
-                loser = i;
-                break;
-            }
-        }
-    }
-    if (winner < 0 || loser < 0 || winner == loser) { tributePending = false; return; }
-
-    int bigJokerCount = 0;
-    for (const auto& c : players[loser]->getHandCopy()) {
-        if (c.getRank() == Rank::B) bigJokerCount++;
-    }
-    if (bigJokerCount >= 2) {
-        qInfo() << "玩家" << loser << "抗贡成功";
-        tributePending = false;
-        return;
-    }
-
-    // Card tribute = pickTributeCard(players[loser]);
-    // if (players[loser]->playCards({tribute})) {
-    //     players[winner]->addCards({tribute});
-    //     qInfo() << "玩家" << loser << "向" << winner << "进贡" << QString::fromStdString(tribute.toString());
-    // }
-    // Card back = pickReturnCard(players[winner]);
-    // if (logicalRank(back) > 0 && players[winner]->playCards({back})) {
-    //     players[loser]->addCards({back});
-    //     qInfo() << "玩家" << winner << "还牌" << QString::fromStdString(back.toString());
-    // }
-    emit playerHandChanged(winner);
-    emit playerHandChanged(loser);
-    tributePending = false;
-}
-
 void Judge::debugDirectWin(int playerId) {
     if (playerId < 0 || playerId >= players.size()) return;
 
@@ -826,4 +510,411 @@ void Judge::debugDirectWin(int playerId) {
 }
 void Judge::resetGameLevels() {
     teamLevels = {2, 2}; // 双方重置为打2
+}
+bool isCardSmaller(const Card& a, const Card& b, int levelRank) {
+    auto getVal = [levelRank](const Card& c) {
+        if (c.getRank() == Rank::B) return 200; // 大王
+        if (c.getRank() == Rank::S) return 190; // 小王
+        int r = c.getRankInt();
+        if (r == levelRank) {
+            // 级牌：红桃 > 其他
+            return (c.getSuit() == Suit::Hearts) ? 180 : 170;
+        }
+        return r * 10; // 普通牌
+    };
+    int va = getVal(a);
+    int vb = getVal(b);
+    if (va != vb) return va < vb;
+    // 同点数比花色
+    return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
+}
+bool isDoubleWinScenario(const std::vector<int>& placements, int totalPlayers) {
+    if (placements.size() != 4) return false;
+    // 假设 teammateOf(0) == 2, teammateOf(1) == 3
+    // 如果第一名和第二名是队友（ID差2），则是双赢
+    int p1 = placements[0];
+    int p2 = placements[1];
+    return std::abs(p1 - p2) == 2;
+}
+void Judge::debugSetLevel(int teamId, int level) {
+    if (teamId >= 0 && teamId < static_cast<int>(teamLevels.size())) {
+        teamLevels[teamId] = level;
+        qDebug() << "调试：已将队伍" << teamId << "等级强制设为" << level;
+    }
+}
+void Judge::debugSimulateGameEnd(const std::vector<int>& manualOrder) {
+    if (manualOrder.size() != 4) {
+        qWarning() << "调试失败：必须输入4个玩家的顺序";
+        return;
+    }
+
+    // 1. 强制覆盖完赛顺序
+    finishOrder = manualOrder;
+
+    // 2. 清空所有玩家手牌（模拟打完了）
+    // 防止 checkVictory 逻辑干扰，也为了视觉上的“结束”
+    for (auto* p : players) {
+        p->clearHand();
+        emit playerHandChanged(p->getID());
+    }
+
+    // 3. 强制通知 UI 清空桌面
+    emit tableCleared();
+
+    // 4. 调用核心结算逻辑
+    // 这会计算双下/双上，更新 teamLevels，并发出 gameFinished 或 matchFinished 信号
+    finalizeGame();
+
+    qDebug() << "调试：已强制按顺序结算 -> " << manualOrder;
+}
+void Judge::startTributePhase() {
+    tributeList.clear();
+    doubleTributeStaging.clear();
+    isResolvingDoubleTribute = false;
+    gamePhase = GamePhase::Tribute;
+
+    if (previousPlacements.size() != 4) {
+        finishTributePhase();
+        return;
+    }
+
+    int p1 = previousPlacements[0]; // 头游
+    int p2 = previousPlacements[1]; // 二游
+    // 注意：previousPlacements是按完成顺序排的，所以back是末游
+    int p3 = previousPlacements[2]; // 三游
+    int p4 = previousPlacements[3]; // 末游
+
+    bool isDoubleWin = isDoubleWinScenario(previousPlacements, 4);
+
+    if (isDoubleWin) {
+        // === 双贡逻辑 ===
+
+        // 1. 检查全队抗贡（双输方的大王总数）
+        int totalBigJokers = 0;
+        // 统计 P3 和 P4 的大王
+        for (const auto& c : players[p3]->getHandCopy()) if (c.getRank() == Rank::B) totalBigJokers++;
+        for (const auto& c : players[p4]->getHandCopy()) if (c.getRank() == Rank::B) totalBigJokers++;
+
+        if (totalBigJokers >= 2) {
+            qInfo() << "双下队伍（" << p3 << "," << p4 << "）共有2张大王，触发全队抗贡！";
+            emit tributeResisted(p3); // 通知 UI，参数传其中一人即可
+            emit tributeResisted(p4);
+            finishTributePhase(); // 直接结束
+            return;
+        }
+
+        // 2. 进入比牌阶段（暂不确定谁给谁，先让两人选牌）
+        isResolvingDoubleTribute = true;
+
+        // 向 P3 和 P4 发起选牌请求
+        // 如果是人类，通过信号通知；如果是AI，设置定时器
+        auto requestCard = [&](int pid) {
+            if (pid == 0) {
+                emit askForTribute(pid, false); // Human
+            } else {
+                QTimer::singleShot(1000 + pid * 200, this, [this, pid]() {
+                    Card c = findLargestCardForTribute(pid);
+                    submitTribute(pid, c);
+                });
+            }
+        };
+
+        requestCard(p3);
+        requestCard(p4);
+
+        qInfo() << "进入双贡比牌阶段，等待玩家" << p3 << "和" << p4 << "选牌";
+    }
+    else {
+        // === 单贡逻辑 ===
+        int loser = p4;
+
+        // 1. 检查单人抗贡
+        int bigJokers = 0;
+        for (const auto& c : players[loser]->getHandCopy()) if (c.getRank() == Rank::B) bigJokers++;
+
+        if (bigJokers >= 2) {
+            qInfo() << "玩家" << loser << "双大王抗贡";
+            emit tributeResisted(loser);
+            finishTributePhase();
+            return;
+        }
+
+        // 2. 生成任务：末游 -> 头游
+        tributeList.push_back({loser, p1, {}, true, false});
+        executeNextTributeStep(); // 开始执行
+    }
+}
+void Judge::executeNextTributeStep() {
+    // 遍历任务列表，找到第一个未完成的任务
+    // 顺序：先处理所有进贡，再处理所有还贡
+
+    // PHASE 1: 进贡
+    if (gamePhase == GamePhase::Tribute) {
+        bool allDone = true;
+        for (auto& trans : tributeList) {
+            if (trans.active && !trans.cardSelected) {
+                allDone = false;
+
+                // 请求该玩家进贡
+                if (trans.payer == 0) { // 人类
+                    emit askForTribute(trans.payer, false); // false = 进贡
+                } else {
+                    // AI 自动进贡
+                    QTimer::singleShot(800, this, [this, trans]() {
+                        // AI 选最大的牌
+                        Card c = findLargestCardForTribute(trans.payer);
+                        submitTribute(trans.payer, c);
+                    });
+                }
+                return; // 等待异步回调
+            }
+        }
+
+        if (allDone) {
+            // 所有进贡选牌完毕，执行移动牌并进入还贡阶段
+            for (auto& trans : tributeList) {
+                if (trans.active) {
+                    players[trans.payer]->playCards({trans.card});
+                    players[trans.receiver]->addCards({trans.card});
+                    emit tributeResult(trans.payer, trans.receiver, trans.card, false);
+                    // 重置标记以便还贡使用
+                    trans.cardSelected = false;
+                }
+            }
+            emit playerHandChanged(-1); // 刷新所有人手牌
+
+            // 切换到还贡阶段
+            gamePhase = GamePhase::ReturnTribute;
+            QTimer::singleShot(1000, this, &Judge::executeNextTributeStep);
+        }
+    }
+    // PHASE 2: 还贡
+    else if (gamePhase == GamePhase::ReturnTribute) {
+        bool allDone = true;
+        for (auto& trans : tributeList) {
+            if (trans.active && !trans.cardSelected) {
+                allDone = false;
+
+                // 注意：还贡方向相反，Receiver (赢家) 选牌还给 Payer (输家)
+                int returner = trans.receiver;
+
+                if (returner == 0) { // 人类
+                    emit askForTribute(returner, true); // true = 还贡
+                } else {
+                    // AI 还贡
+                    QTimer::singleShot(800, this, [this, trans, returner]() {
+                        // AI 策略：选最小的牌（非红桃级牌）
+                        // 这里简单实现：选最小的一张牌
+                        auto hand = players[returner]->getHandCopy();
+                        int level = getCurrentLevelRank();
+                        // 排序：小 -> 大
+                        std::sort(hand.begin(), hand.end(), [level](const Card& a, const Card& b){
+                            return isCardSmaller(a, b, level);
+                        });
+                        // 选第一张（最小），但尽量不要还级牌
+                        Card ret = hand.front();
+                        for(const auto& c : hand) {
+                            if (c.getRankInt() != level && c.getRank() != Rank::S && c.getRank() != Rank::B) {
+                                ret = c;
+                                break;
+                            }
+                        }
+                        submitTribute(returner, ret);
+                    });
+                }
+                return;
+            }
+        }
+
+        if (allDone) {
+            // 执行还贡移动
+            for (auto& trans : tributeList) {
+                if (trans.active) {
+                    // 注意：trans.card 现在存的是还贡的牌
+                    players[trans.receiver]->playCards({trans.card}); // 赢家出牌
+                    players[trans.payer]->addCards({trans.card});     // 输家拿牌
+                    emit tributeResult(trans.receiver, trans.payer, trans.card, true);
+                }
+            }
+            emit playerHandChanged(-1);
+
+            // 全部结束
+            QTimer::singleShot(1000, this, &Judge::finishTributePhase);
+        }
+    }
+}
+
+bool Judge::submitTribute(int playerId, const Card& card) {
+    if (gamePhase != GamePhase::Tribute && gamePhase != GamePhase::ReturnTribute) return false;
+
+    // --- 双贡比牌阶段特殊处理 ---
+    if (isResolvingDoubleTribute) {
+        // 验证牌是否最大（规则同单贡）
+        Card maxCard = findLargestCardForTribute(playerId);
+        // 注意：这里需要严格比较，包括花色大小
+        // 如果玩家选的不是最大的，拒绝（除非有多个同样大的）
+        // 这里为了简化，假设校验逻辑与之前一致...
+        if (isCardSmaller(card, maxCard, getCurrentLevelRank())) {
+            qWarning() << "进贡违规：双贡也必须进贡最大的牌";
+            return false;
+        }
+
+        // 暂存
+        doubleTributeStaging[playerId] = card;
+        qInfo() << "玩家" << playerId << "双贡选牌：" << QString::fromStdString(card.toString());
+
+        // 检查是否两人都选好了
+        int p3 = previousPlacements[2];
+        int p4 = previousPlacements[3];
+
+        if (doubleTributeStaging.count(p3) && doubleTributeStaging.count(p4)) {
+            resolveDoubleTributeMatch();
+        }
+        return true;
+    }
+
+    if (gamePhase == GamePhase::Playing) return false;
+
+    // 找到属于该玩家的当前任务
+    for (auto& trans : tributeList) {
+        if (!trans.active || trans.cardSelected) continue;
+
+        int targetPlayer = (gamePhase == GamePhase::Tribute) ? trans.payer : trans.receiver;
+
+        if (targetPlayer == playerId) {
+            // 验证规则
+            if (gamePhase == GamePhase::Tribute) {
+                // 进贡规则：必须是除红桃级牌外最大的牌
+                Card maxCard = findLargestCardForTribute(playerId);
+                // 允许花色不同（如果有多个同样大的），但点数和等级必须一致
+                // 简单校验：Value 必须相等
+                if (isCardSmaller(card, maxCard, getCurrentLevelRank())) {
+                    qWarning() << "进贡违规：必须进贡最大的牌！应为" << QString::fromStdString(maxCard.toString());
+                    return false; // UI 应该提示错误
+                }
+                // 特殊：红桃级牌不能进贡（findLargestCardForTribute 已经过滤了）
+            }
+            else {
+                // 还贡规则：通常不限制，可以是任意牌
+                // 但不能是空
+            }
+
+            trans.card = card;
+            trans.cardSelected = true;
+            qInfo() << "玩家" << playerId << (gamePhase==GamePhase::Tribute?"进贡":"还贡") << QString::fromStdString(card.toString());
+
+            // 继续下一步
+            executeNextTributeStep();
+            return true;
+        }
+    }
+    return false;
+}
+
+void Judge::finishTributePhase() {
+    gamePhase = GamePhase::Playing;
+
+    // 进贡结束，由进贡者（输家）先出牌
+    // 规则：如果是单贡，进贡者先出；
+    // 如果是双贡，由进贡大牌者先出？或者上一局的末游？
+    // 掼蛋通用规则：进贡给谁，谁就有出牌权（如果还贡了，出牌权通常归还给进贡者）
+    // 通行规则：也就是进贡的那一方（末游）出牌。
+
+    // 如果抗贡，则由头游（赢家）出牌。
+
+    int leader = 0;
+
+    // 简单判定：如果没有活跃的进贡，Winner 先出
+    bool anyTribute = false;
+    for (auto t : tributeList) if (t.active) anyTribute = true;
+
+    if (!anyTribute) {
+        leader = previousPlacements[0]; // 抗贡，头游先出
+    } else {
+        // 有进贡，通常规定进贡最大牌的人先出。
+        // 这里简化：单贡时，最后一名先出。双贡时，第4名先出。
+        leader = previousPlacements.back();
+    }
+
+    startNewRound(leader);
+
+    // 触发第一轮
+    if (leader != 0) {
+        QTimer::singleShot(800, this, &Judge::aiPlay);
+    } else {
+        emit playerTurnStart(0);
+    }
+}
+
+Card Judge::findLargestCardForTribute(int playerId) const {
+    auto hand = players[playerId]->getHandCopy();
+    int level = getCurrentLevelRank();
+
+    // 过滤红桃级牌（红桃级牌不能进贡，除非手上全是红桃级牌——这在实战几乎不可能）
+    std::vector<Card> candidates;
+    for (const auto& c : hand) {
+        if (c.getSuit() == Suit::Hearts && c.getRankInt() == level) continue;
+        candidates.push_back(c);
+    }
+
+    if (candidates.empty()) return hand.back(); // 极端情况回退
+
+    // 排序：大 -> 小
+    std::sort(candidates.begin(), candidates.end(), [level](const Card& a, const Card& b){
+        return !isCardSmaller(a, b, level); // 降序
+    });
+
+    return candidates[0];
+}
+// 核心：双贡比大小，分配进贡对象
+void Judge::resolveDoubleTributeMatch() {
+    isResolvingDoubleTribute = false; // 结束比牌阶段
+
+    int p1 = previousPlacements[0]; // 头游
+    int p2 = previousPlacements[1]; // 二游
+    int p3 = previousPlacements[2]; // 三游
+    int p4 = previousPlacements[3]; // 末游
+
+    Card c3 = doubleTributeStaging[p3];
+    Card c4 = doubleTributeStaging[p4];
+    int level = getCurrentLevelRank();
+
+    // 比较 c3 和 c4 的大小
+    // 注意：isCardSmaller 返回 true 代表 a < b
+    bool p3IsSmaller = isCardSmaller(c3, c4, level);
+    bool p4IsSmaller = isCardSmaller(c4, c3, level);
+
+    int bigPayer, smallPayer;
+    Card bigCard, smallCard;
+
+    if (!p3IsSmaller && p3IsSmaller != p4IsSmaller) {
+        // P3 > P4
+        bigPayer = p3; bigCard = c3;
+        smallPayer = p4; smallCard = c4;
+    } else if (!p4IsSmaller && p3IsSmaller != p4IsSmaller) {
+        // P4 > P3
+        bigPayer = p4; bigCard = c4;
+        smallPayer = p3; smallCard = c3;
+    } else {
+        // 平局 (点数花色逻辑值完全一样，虽然一般花色不同大小也不同，但在某些规则下可能视为同级)
+        // 规则：若大小相同，按顺位进贡。
+        // 即：末游(P4) 进贡给 头游(P1)，三游(P3) 进贡给 二游(P2)
+        // 注意：这里我们视为“原始位次”，不交换
+        qInfo() << "进贡牌大小相同，按默认顺位进贡";
+
+        // 直接生成任务
+        tributeList.push_back({p4, p1, c4, true, true}); // 末游 -> 头游
+        tributeList.push_back({p3, p2, c3, true, true}); // 三游 -> 二游
+        goto EXECUTE; // 跳过下方赋值，直接执行
+    }
+
+    // 正常情况：大牌 -> P1, 小牌 -> P2
+    tributeList.push_back({bigPayer, p1, bigCard, true, true});
+    tributeList.push_back({smallPayer, p2, smallCard, true, true});
+
+EXECUTE:
+    // 任务已经生成，并且牌已经选好了 (cardSelected = true)
+    // 我们可以直接调用 executeNextTributeStep 来执行“移动牌”和“进入还贡”
+    qInfo() << "双贡分配完成：大牌进头游，小牌进二游";
+    executeNextTributeStep();
 }

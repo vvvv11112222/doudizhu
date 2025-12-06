@@ -50,10 +50,10 @@ private:
     QPushButton *btnNewGame;
     //出牌按键
     QPushButton *btnPlay;
-    QPushButton *btnPlayerPlay;
 
     //强制获胜
      QPushButton *btnCheatWin;
+    QPushButton *btnDebugOrder;
 };
 
 #endif // MAINWINDOW_H

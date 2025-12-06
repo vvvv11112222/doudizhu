@@ -21,8 +21,6 @@ public:
     Q_SLOT void toggleSelectCard(int index);    // 切换选牌状态
     Q_SLOT void onUserConfirmPlay();              // 用户点击“出牌”按钮
     Q_SLOT void onUserPass();                     // 用户点击“过”按钮
-    Q_SLOT void onUserRequestHint();              // 用户请求提示（可与 Judge 协作）
-
     // 只读方法，供 MainWindow 获取显示数据
     Q_INVOKABLE std::vector<Card> getHandCopy() const;
     Q_INVOKABLE std::vector<Card> getSelectedCards() const; // 返回当前被选的牌索引
@@ -33,8 +31,6 @@ signals:
     // HumanPlayer 发给 GameManager 的信号
     void moveReady(const std::vector<Card>& cards); // 玩家确认出牌（候选）
     void passed();                                  // 玩家选择过
-    void showHandRequested(int playerId, const std::vector<Card>& hand, const std::vector<Card>& lastPlay);
-    void requestHintFromJudge(int playerId);
 
     // 用于 UI 提示（错误/非法出牌）
     void invalidMove(const QString& reason);
