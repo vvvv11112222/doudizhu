@@ -1,6 +1,9 @@
 #include "mainwindow.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
+#include <QScrollArea>
+#include <QFrame>
 #include <QMessageBox>
 #include <QListWidgetItem>
 #include <QStyledItemDelegate>
@@ -142,7 +145,7 @@ MainWindow::~MainWindow()
 void MainWindow::setupUI()
 {
     setWindowTitle("掼蛋 - 示例版");
-    resize(1000, 700);
+    resize(1280, 800);
 
     QWidget *central = new QWidget(this);
     setCentralWidget(central);
@@ -151,6 +154,10 @@ void MainWindow::setupUI()
     listAI2 = new QListWidget;
     listAI3 = new QListWidget;
     listHuman = new QListWidget;
+    listHuman->setSizeAdjustPolicy(QAbstractItemView::AdjustToContents);
+    listHuman->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    listHuman->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    listHuman->setUniformItemSizes(true);
     lblLastPlay = new QLabel("上家出牌：无");
     lblStatus = new QLabel("游戏状态：等待开始");
     lblLevels = new QLabel("队伍等级：-- / --");
@@ -250,7 +257,7 @@ void MainWindow::setupUI()
     makePlayWidgetDefault(playRight);
     makePlayWidgetDefault(playCenterBottom);
     // 辅助函数：创建一个带头像和文字的垂直布局
-    auto createPlayerLayout = [](QString name, QWidget* playArea) -> QVBoxLayout* {
+    auto createPlayerLayout = [](QString name, QWidget* playArea, QListWidget* remainList = nullptr) -> QVBoxLayout* {
         QVBoxLayout* box = new QVBoxLayout;
 
         // 模拟头像
@@ -266,45 +273,78 @@ void MainWindow::setupUI()
 
         box->addWidget(avatar, 0, Qt::AlignCenter);
         box->addWidget(nameLbl, 0, Qt::AlignCenter);
+        if (remainList) {
+            remainList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            remainList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            remainList->setFrameShape(QFrame::NoFrame);
+            remainList->setStyleSheet("QListWidget { color: #F8E71C; font-weight: bold; background: transparent; }");
+            remainList->setFixedHeight(28);
+            box->addWidget(remainList, 0, Qt::AlignCenter);
+        }
         box->addWidget(playArea, 0, Qt::AlignCenter);
         return box;
     };
-    // --- 布局：我们做一个 3x3 风格的中间区域（Top / Left / Center / Right / Bottom） ---
+    // --- 布局：带面板的 3x3 中心区域，外加独立的手牌区域 ---
     QVBoxLayout *mainLay = new QVBoxLayout;
-    // Top row: player2 label + playTop (centered)
-    QHBoxLayout *rowTop = new QHBoxLayout;
-    rowTop->addStretch();
-    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 2", playTop);
-    rowTop->addLayout(topBox);
-    rowTop->addStretch(); // 保持居中
-    // Middle row: left play, center info, right play
-    QHBoxLayout *rowMiddle = new QHBoxLayout;
-    // left column (player3)
-    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 3", playLeft);
-    rowMiddle->addLayout(leftBox);
+
+    QFrame *boardFrame = new QFrame;
+    boardFrame->setObjectName("boardFrame");
+    QGridLayout *boardGrid = new QGridLayout(boardFrame);
+    boardGrid->setContentsMargins(16, 12, 16, 12);
+    boardGrid->setHorizontalSpacing(20);
+    boardGrid->setVerticalSpacing(12);
+    boardGrid->setColumnStretch(0, 1);
+    boardGrid->setColumnStretch(1, 2);
+    boardGrid->setColumnStretch(2, 1);
+
+    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 2", playTop, listAI2);
+    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 3", playLeft, listAI3);
+    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 1", playRight, listAI1);
 
     // center column: can show game status / last plays overall
     QVBoxLayout *centerBox = new QVBoxLayout;
+    centerBox->setAlignment(Qt::AlignCenter);
+    centerBox->setSpacing(6);
     centerBox->addWidget(lblLastPlay, 0, Qt::AlignCenter);
     centerBox->addWidget(lblStatus, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevels, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
-    rowMiddle->addLayout(centerBox, 1); // give center more stretch
 
-    // right column (player1)
-    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 1", playRight);
-    rowMiddle->addLayout(rightBox);
-    // Bottom row: human play area above human hand
-    QHBoxLayout *rowBottom = new QHBoxLayout;
-    rowBottom->addStretch();
     QVBoxLayout *humanPlayBox = new QVBoxLayout;
-    humanPlayBox->addWidget(new QLabel("桌面 - 你的出牌"), 0, Qt::AlignCenter);
-    humanPlayBox->addWidget(playCenterBottom);
-    humanPlayBox->addWidget(new QLabel("你的手牌"));
-     humanPlayBox->addWidget(lblSelection);
-    humanPlayBox->addWidget(listHuman);
-    rowBottom->addLayout(humanPlayBox);
-    rowBottom->addStretch();
+    QLabel *deskTitle = new QLabel("桌面 - 你的出牌");
+    deskTitle->setAlignment(Qt::AlignCenter);
+    humanPlayBox->addWidget(deskTitle, 0, Qt::AlignCenter);
+    humanPlayBox->addWidget(playCenterBottom, 0, Qt::AlignCenter);
+
+    boardGrid->addLayout(topBox, 0, 1, Qt::AlignCenter);
+    boardGrid->addLayout(leftBox, 1, 0, Qt::AlignCenter);
+    boardGrid->addLayout(centerBox, 1, 1);
+    boardGrid->addLayout(rightBox, 1, 2, Qt::AlignCenter);
+    boardGrid->addLayout(humanPlayBox, 2, 0, 1, 3);
+
+    QFrame *handFrame = new QFrame;
+    handFrame->setObjectName("handFrame");
+    QVBoxLayout *handLayout = new QVBoxLayout(handFrame);
+    handLayout->setContentsMargins(16, 12, 16, 12);
+    handLayout->setSpacing(8);
+    QLabel *handTitle = new QLabel("你的手牌");
+    handTitle->setAlignment(Qt::AlignCenter);
+    handLayout->addWidget(handTitle);
+    handLayout->addWidget(lblSelection);
+
+    QScrollArea *handScroll = new QScrollArea;
+    handScroll->setFrameShape(QFrame::NoFrame);
+    handScroll->setWidgetResizable(true);
+    handScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    handScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+
+    QWidget *handContainer = new QWidget;
+    QHBoxLayout *handContainerLayout = new QHBoxLayout(handContainer);
+    handContainerLayout->setContentsMargins(0, 0, 0, 0);
+    handContainerLayout->addWidget(listHuman);
+    handScroll->setWidget(handContainer);
+
+    handLayout->addWidget(handScroll);
 
     // Buttons row
     QHBoxLayout *buttons = new QHBoxLayout;
@@ -314,9 +354,8 @@ void MainWindow::setupUI()
     buttons->addWidget(btnCheatWin);
     buttons->addWidget(btnDebugOrder);
 
-    mainLay->addLayout(rowTop);
-    mainLay->addLayout(rowMiddle);
-    mainLay->addLayout(rowBottom);
+    mainLay->addWidget(boardFrame);
+    mainLay->addWidget(handFrame);
     mainLay->addLayout(buttons);
 
     central->setLayout(mainLay);
@@ -328,7 +367,7 @@ void MainWindow::setupUI()
     playRight->setItemDelegate(delegate);
     playCenterBottom->setItemDelegate(delegate);
 
-    auto polishList = [](QListWidget* list, int baseIconW = 90, int baseIconH = 120, int overlap = -40) {
+    auto polishList = [](QListWidget* list, int baseIconW = 90, int baseIconH = 120, int overlap = -40, bool allowScroll = false) {
         list->setViewMode(QListView::IconMode);
         list->setFlow(QListView::LeftToRight);
         list->setWrapping(false);
@@ -349,7 +388,7 @@ void MainWindow::setupUI()
 
         list->setMovement(QListView::Static);
         list->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        list->setHorizontalScrollBarPolicy(allowScroll ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff);
         list->setStyleSheet("background: transparent; border: none;");
         list->setFocusPolicy(Qt::NoFocus);
 
@@ -358,7 +397,7 @@ void MainWindow::setupUI()
         list->setFixedHeight(gridH + extraVerticalMargin);
     };
 
-    polishList(listHuman, 90, 120, -35);      // 底部手牌，图标 90x120，重叠 -35
+    polishList(listHuman, 90, 120, -28, true);      // 底部手牌，图标 90x120，重叠 -28，支持横向滚动
     polishList(playTop, 70, 90, -40);         // 顶部AI出牌区，稍小
     polishList(playLeft, 70, 90, -40);
     polishList(playRight, 70, 90, -40);
@@ -385,6 +424,19 @@ void MainWindow::setupUI()
             background-color: transparent;
             border: none;
             outline: none; /* 去掉选中时的虚线框 */
+        }
+
+        /* 手牌与出牌区域的面板背景 */
+        QFrame#boardFrame, QFrame#handFrame {
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 14px;
+            padding: 8px;
+        }
+
+        QScrollArea {
+            background: transparent;
+            border: none;
         }
 
         /* 按钮通用风格：橙色渐变，圆角 */
