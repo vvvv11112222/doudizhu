@@ -357,6 +357,7 @@ void MainWindow::setupUI()
     centerBox->addWidget(lblStatus, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevels, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
+    tableCenterLayout->addLayout(centerBox);
 
     tableGrid->addWidget(playTop, 0, 1, Qt::AlignHCenter | Qt::AlignTop);
     tableGrid->addWidget(playLeft, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
