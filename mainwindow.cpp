@@ -279,34 +279,36 @@ void MainWindow::setupUI()
     makePlayWidgetDefault(playRight);
     makePlayWidgetDefault(playCenterBottom);
     // 辅助函数：创建一个带头像和文字的垂直布局
-    auto createPlayerLayout = [](QString name, QWidget* playArea, QListWidget* remainList = nullptr) -> QVBoxLayout* {
-        QVBoxLayout* box = new QVBoxLayout;
+    auto createPlayerInfoWidget = [](QString name, QListWidget* remainList = nullptr) -> QWidget* {
+        QWidget* box = new QWidget;
+        QVBoxLayout* layout = new QVBoxLayout(box);
+        layout->setSpacing(6);
+        layout->setContentsMargins(6, 6, 6, 6);
 
-        // 模拟头像
         QLabel* avatar = new QLabel;
-        avatar->setPixmap(QPixmap(60, 60)); // 实际应用请用 setPixmap(QPixmap(":/img/avatar.png"));
-        avatar->setStyleSheet("background-color: #DDD; border-radius: 30px; border: 2px solid white;");
+        avatar->setPixmap(QPixmap(60, 60));
+        avatar->setStyleSheet("QLabel { background-color: #F1C40F; border-radius: 30px; color: #4A235A; font-size: 24px; border: 2px solid white; }");
         avatar->setFixedSize(60, 60);
         avatar->setAlignment(Qt::AlignCenter);
-        avatar->setText(name.left(1)); // 显示名字首字母当头像
-        avatar->setStyleSheet("QLabel { background-color: #F1C40F; border-radius: 30px; color: #4A235A; font-size: 24px; border: 2px solid white; }");
+        avatar->setText(name.left(1));
 
         QLabel* nameLbl = new QLabel(name);
+        nameLbl->setAlignment(Qt::AlignCenter);
 
-        box->addWidget(avatar, 0, Qt::AlignCenter);
-        box->addWidget(nameLbl, 0, Qt::AlignCenter);
+        layout->addWidget(avatar, 0, Qt::AlignCenter);
+        layout->addWidget(nameLbl, 0, Qt::AlignCenter);
         if (remainList) {
             remainList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             remainList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             remainList->setFrameShape(QFrame::NoFrame);
             remainList->setStyleSheet("QListWidget { color: #F8E71C; font-weight: bold; background: transparent; }");
             remainList->setFixedHeight(28);
-            box->addWidget(remainList, 0, Qt::AlignCenter);
+            layout->addWidget(remainList, 0, Qt::AlignCenter);
         }
-        box->addWidget(playArea, 0, Qt::AlignCenter);
+
         return box;
     };
-    // --- 布局：带面板的 3x3 中心区域，外加独立的手牌区域 ---
+    // --- 布局：带牌桌的中心区域，外加独立的手牌区域 ---
     QVBoxLayout *mainLay = new QVBoxLayout;
 
     auto applyShadow = [](QWidget *w) {
@@ -320,20 +322,35 @@ void MainWindow::setupUI()
     QFrame *boardFrame = new QFrame;
     boardFrame->setObjectName("boardFrame");
     applyShadow(boardFrame);
-    QGridLayout *boardGrid = new QGridLayout(boardFrame);
-    boardGrid->setContentsMargins(16, 12, 16, 12);
-    boardGrid->setHorizontalSpacing(20);
-    boardGrid->setVerticalSpacing(12);
-    boardGrid->setColumnStretch(0, 1);
-    boardGrid->setColumnStretch(1, 2);
-    boardGrid->setColumnStretch(2, 1);
 
-    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 2", playTop, listAI2);
-    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 3", playLeft, listAI3);
-    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 1", playRight, listAI1);
+    QWidget *topInfo = createPlayerInfoWidget("AI 电脑 2", listAI2);
+    QWidget *leftInfo = createPlayerInfoWidget("AI 电脑 3", listAI3);
+    QWidget *rightInfo = createPlayerInfoWidget("AI 电脑 1", listAI1);
+    QWidget *humanInfo = createPlayerInfoWidget("玩家本人", nullptr);
 
-    // center column: can show game status / last plays overall
-    QVBoxLayout *centerBox = new QVBoxLayout;
+    QVBoxLayout *boardLayout = new QVBoxLayout(boardFrame);
+    boardLayout->setContentsMargins(16, 12, 16, 12);
+    boardLayout->setSpacing(10);
+
+    boardLayout->addWidget(topInfo, 0, Qt::AlignHCenter);
+
+    QFrame *tableSurface = new QFrame;
+    tableSurface->setObjectName("tableSurface");
+    QGridLayout *tableGrid = new QGridLayout(tableSurface);
+    tableGrid->setContentsMargins(24, 24, 24, 24);
+    tableGrid->setHorizontalSpacing(6);
+    tableGrid->setVerticalSpacing(6);
+    tableGrid->setColumnStretch(0, 1);
+    tableGrid->setColumnStretch(1, 2);
+    tableGrid->setColumnStretch(2, 1);
+    tableGrid->setRowStretch(0, 1);
+    tableGrid->setRowStretch(1, 2);
+    tableGrid->setRowStretch(2, 1);
+
+    QWidget *centerInfo = new QWidget;
+    centerInfo->setAttribute(Qt::WA_StyledBackground, false);
+    centerInfo->setStyleSheet("background: transparent;");
+    QVBoxLayout *centerBox = new QVBoxLayout(centerInfo);
     centerBox->setAlignment(Qt::AlignCenter);
     centerBox->setSpacing(6);
     centerBox->addWidget(lblLastPlay, 0, Qt::AlignCenter);
@@ -341,17 +358,24 @@ void MainWindow::setupUI()
     centerBox->addWidget(lblLevels, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
 
-    QVBoxLayout *humanPlayBox = new QVBoxLayout;
+    tableGrid->addWidget(playTop, 0, 1, Qt::AlignHCenter | Qt::AlignTop);
+    tableGrid->addWidget(playLeft, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    tableGrid->addWidget(centerInfo, 1, 1, Qt::AlignCenter);
+    tableGrid->addWidget(playRight, 1, 2, Qt::AlignRight | Qt::AlignVCenter);
+    tableGrid->addWidget(playCenterBottom, 2, 1, Qt::AlignHCenter | Qt::AlignBottom);
+
     QLabel *deskTitle = new QLabel("桌面 - 你的出牌");
     deskTitle->setAlignment(Qt::AlignCenter);
-    humanPlayBox->addWidget(deskTitle, 0, Qt::AlignCenter);
-    humanPlayBox->addWidget(playCenterBottom, 0, Qt::AlignCenter);
 
-    boardGrid->addLayout(topBox, 0, 1, Qt::AlignCenter);
-    boardGrid->addLayout(leftBox, 1, 0, Qt::AlignCenter);
-    boardGrid->addLayout(centerBox, 1, 1);
-    boardGrid->addLayout(rightBox, 1, 2, Qt::AlignCenter);
-    boardGrid->addLayout(humanPlayBox, 2, 0, 1, 3);
+    QHBoxLayout *middleRow = new QHBoxLayout;
+    middleRow->setSpacing(12);
+    middleRow->addWidget(leftInfo, 0, Qt::AlignTop);
+    middleRow->addWidget(tableSurface, 1);
+    middleRow->addWidget(rightInfo, 0, Qt::AlignTop);
+
+    boardLayout->addLayout(middleRow);
+    boardLayout->addWidget(deskTitle, 0, Qt::AlignCenter);
+    boardLayout->addWidget(humanInfo, 0, Qt::AlignHCenter);
 
     QFrame *handFrame = new QFrame;
     handFrame->setObjectName("handFrame");
@@ -433,10 +457,10 @@ void MainWindow::setupUI()
     };
 
     polishList(listHuman, 90, 120, -28, true);      // 底部手牌，图标 90x120，重叠 -28，支持横向滚动
-    polishList(playTop, 70, 90, -40);         // 顶部AI出牌区，稍小
-    polishList(playLeft, 70, 90, -40);
-    polishList(playRight, 70, 90, -40);
-    polishList(playCenterBottom, 80, 100, -38); // 中央桌面显示区
+    polishList(playTop, 70, 90, -46);         // 顶部AI出牌区，稍小但保持堆叠
+    polishList(playLeft, 70, 90, -46);
+    polishList(playRight, 70, 90, -46);
+    polishList(playCenterBottom, 80, 100, -42); // 中央桌面显示区，保持明显重叠
 
     // 2. 全局 QSS 样式表
     QString qss = R"(
@@ -486,6 +510,14 @@ void MainWindow::setupUI()
             border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 16px;
             padding: 10px;
+        }
+
+        QFrame#tableSurface {
+            background: qradialgradient(cx:0.5, cy:0.5, fx:0.5, fy:0.45, radius:1,
+                stop:0 #126f3a, stop:1 #0a3f24);
+            border: 2px solid rgba(255, 255, 255, 0.16);
+            border-radius: 18px;
+            min-height: 260px;
         }
 
         QScrollArea {
