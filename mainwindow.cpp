@@ -334,26 +334,23 @@ void MainWindow::setupUI()
 
     boardLayout->addWidget(topInfo, 0, Qt::AlignHCenter);
 
-    QGridLayout *boardGrid = new QGridLayout;
-    boardGrid->setContentsMargins(10, 4, 10, 4);
-    boardGrid->setHorizontalSpacing(18);
-    boardGrid->setVerticalSpacing(10);
-    boardGrid->setColumnStretch(0, 1);
-    boardGrid->setColumnStretch(1, 2);
-    boardGrid->setColumnStretch(2, 3);
-    boardGrid->setColumnStretch(3, 2);
-    boardGrid->setColumnStretch(4, 1);
-    boardGrid->setRowStretch(0, 1);
-    boardGrid->setRowStretch(1, 3);
-    boardGrid->setRowStretch(2, 1);
-
     QFrame *tableSurface = new QFrame;
     tableSurface->setObjectName("tableSurface");
-    QVBoxLayout *tableCenterLayout = new QVBoxLayout(tableSurface);
-    tableCenterLayout->setAlignment(Qt::AlignCenter);
-    tableCenterLayout->setContentsMargins(18, 18, 18, 18);
+    QGridLayout *tableGrid = new QGridLayout(tableSurface);
+    tableGrid->setContentsMargins(24, 24, 24, 24);
+    tableGrid->setHorizontalSpacing(6);
+    tableGrid->setVerticalSpacing(6);
+    tableGrid->setColumnStretch(0, 1);
+    tableGrid->setColumnStretch(1, 2);
+    tableGrid->setColumnStretch(2, 1);
+    tableGrid->setRowStretch(0, 1);
+    tableGrid->setRowStretch(1, 2);
+    tableGrid->setRowStretch(2, 1);
 
-    QVBoxLayout *centerBox = new QVBoxLayout;
+    QWidget *centerInfo = new QWidget;
+    centerInfo->setAttribute(Qt::WA_StyledBackground, false);
+    centerInfo->setStyleSheet("background: transparent;");
+    QVBoxLayout *centerBox = new QVBoxLayout(centerInfo);
     centerBox->setAlignment(Qt::AlignCenter);
     centerBox->setSpacing(6);
     centerBox->addWidget(lblLastPlay, 0, Qt::AlignCenter);
@@ -362,18 +359,22 @@ void MainWindow::setupUI()
     centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
     tableCenterLayout->addLayout(centerBox);
 
+    tableGrid->addWidget(playTop, 0, 1, Qt::AlignHCenter | Qt::AlignTop);
+    tableGrid->addWidget(playLeft, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
+    tableGrid->addWidget(centerInfo, 1, 1, Qt::AlignCenter);
+    tableGrid->addWidget(playRight, 1, 2, Qt::AlignRight | Qt::AlignVCenter);
+    tableGrid->addWidget(playCenterBottom, 2, 1, Qt::AlignHCenter | Qt::AlignBottom);
+
     QLabel *deskTitle = new QLabel("桌面 - 你的出牌");
     deskTitle->setAlignment(Qt::AlignCenter);
 
-    boardGrid->addWidget(playTop, 0, 2, Qt::AlignCenter);
-    boardGrid->addWidget(playLeft, 1, 1, Qt::AlignCenter);
-    boardGrid->addWidget(tableSurface, 1, 2);
-    boardGrid->addWidget(playRight, 1, 3, Qt::AlignCenter);
-    boardGrid->addWidget(playCenterBottom, 2, 2, Qt::AlignCenter);
-    boardGrid->addWidget(leftInfo, 1, 0, Qt::AlignCenter);
-    boardGrid->addWidget(rightInfo, 1, 4, Qt::AlignCenter);
+    QHBoxLayout *middleRow = new QHBoxLayout;
+    middleRow->setSpacing(12);
+    middleRow->addWidget(leftInfo, 0, Qt::AlignTop);
+    middleRow->addWidget(tableSurface, 1);
+    middleRow->addWidget(rightInfo, 0, Qt::AlignTop);
 
-    boardLayout->addLayout(boardGrid);
+    boardLayout->addLayout(middleRow);
     boardLayout->addWidget(deskTitle, 0, Qt::AlignCenter);
     boardLayout->addWidget(humanInfo, 0, Qt::AlignHCenter);
 
@@ -457,10 +458,10 @@ void MainWindow::setupUI()
     };
 
     polishList(listHuman, 90, 120, -28, true);      // 底部手牌，图标 90x120，重叠 -28，支持横向滚动
-    polishList(playTop, 70, 90, -40);         // 顶部AI出牌区，稍小
-    polishList(playLeft, 70, 90, -40);
-    polishList(playRight, 70, 90, -40);
-    polishList(playCenterBottom, 80, 100, -38); // 中央桌面显示区
+    polishList(playTop, 70, 90, -46);         // 顶部AI出牌区，稍小但保持堆叠
+    polishList(playLeft, 70, 90, -46);
+    polishList(playRight, 70, 90, -46);
+    polishList(playCenterBottom, 80, 100, -42); // 中央桌面显示区，保持明显重叠
 
     // 2. 全局 QSS 样式表
     QString qss = R"(

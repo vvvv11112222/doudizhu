@@ -94,11 +94,16 @@ void Player::updateRankCounts() {
     }
 
     // 按 rank + suit 排序（便于显示与做牌型检测前的顺序）
-    std::sort(handCards.begin(), handCards.end(), [](const Card &a, const Card &b) {
-        int ia = a.getRankInt();
-        int ib = b.getRankInt();
-        if (ia != ib) return ia < ib;
-        // 如果花色也是 enum class，按其 underlying value 比较（或显式 switch）
+    auto rankWeight = [](const Card &c) {
+        int val = c.getRankInt();
+        if (val == 2) val = 15; // 2 应排在 A 之后
+        return val;
+    };
+
+    std::sort(handCards.begin(), handCards.end(), [&](const Card &a, const Card &b) {
+        int ia = rankWeight(a);
+        int ib = rankWeight(b);
+        if (ia != ib) return ia > ib; // 由大到小排列，方便展示
         return static_cast<int>(a.getSuit()) < static_cast<int>(b.getSuit());
     });
 }
