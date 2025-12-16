@@ -37,7 +37,8 @@ public:
     PlayInfo analyze();
 
 private:
-    std::vector<Card> solids; // 固定牌（除去万能牌后的牌）
+    std::vector<Card> allCards; // 保存所有牌，便于做花色等整体校验
+    std::vector<Card> solids;   // 固定牌（除去万能牌后的牌）
     int wildCount;            // 万能牌（红桃级牌）数量
     int levelRank;            // 当前级牌点数（如打2，则levelRank=15）
     int totalCount;           // 牌总数
