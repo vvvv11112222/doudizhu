@@ -23,9 +23,10 @@ class CardDelegate : public QStyledItemDelegate {
 public:
     using QStyledItemDelegate::QStyledItemDelegate;
 
-    // 1. 【修改】调整牌的尺寸，让它更大、比例更协调
     QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override {
-        return QSize(80, 110); // 宽80，高110
+        Q_UNUSED(option);
+        Q_UNUSED(index);
+        return QSize(100, 140); // 统一的卡片显示尺寸
     }
 
     void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override {
@@ -35,9 +36,8 @@ public:
         painter->setRenderHint(QPainter::Antialiasing);
 
         QString text = index.data(Qt::DisplayRole).toString();
-
         // 处理特殊状态文字
-        if (text == "不要" || text == "PASS") {
+        if (text == "不要" || text.compare("PASS", Qt::CaseInsensitive) == 0) {
             painter->setPen(QColor(100, 100, 100));
             QFont font = painter->font();
             font.setBold(true);
@@ -51,81 +51,115 @@ public:
 
         // 绘制卡牌背景
         bool isSelected = index.data(Qt::UserRole).toBool();
-        QRect rect = option.rect;
+        QRect rect = option.rect.adjusted(6, 10, -6, -10);
+        if (isSelected) rect.translate(0, -18); // 选中上浮
 
-        // 【修改】调整边距，防止文字被切掉
-        rect.adjust(4, 20, -4, -4);
-        if (isSelected) rect.translate(0, -20); // 选中上浮
-
-        // 阴影
-        painter->setBrush(QColor(0, 0, 0, 50));
+        painter->setBrush(QColor(0, 0, 0, 60));
         painter->setPen(Qt::NoPen);
-        painter->drawRoundedRect(rect.translated(2, 2), 8, 8);
+        painter->drawRoundedRect(rect.translated(3, 5), 12, 12);
 
-        // 牌面
         painter->setBrush(Qt::white);
-        painter->setPen(QPen(Qt::gray, 1));
-        painter->drawRoundedRect(rect, 8, 8);
+        painter->setPen(QPen(QColor(200, 200, 210), 1.2));
+        painter->drawRoundedRect(rect, 12, 12);
 
-        // 2. 【修复】解析花色和点数的核心逻辑
-        QColor textColor = Qt::black;
-        if (text.contains("♥") || text.contains("♦")) textColor = QColor(200, 0, 0); // 红色
+        const QString resourcePath = resourcePathForCard(text);
+        QPixmap pixmap = pixmapForPath(resourcePath);
 
-        QString rankStr = text;
-        QString suitStr = "";
-
-        if (text.contains("jokerSmall")) {
-            rankStr = "JOKER"; suitStr="BLACK"; textColor=Qt::black;
-        }
-        else if (text.contains("jokerBig")) {
-            rankStr = "JOKER"; suitStr="RED"; textColor=QColor(200, 0, 0);
-        }
-        else {
-            // 提取花色（Qt中花色符号长度通常为1）
-            if (text.startsWith("♠")) suitStr="♠";
-            else if (text.startsWith("♣")) suitStr="♣";
-            else if (text.startsWith("♥")) suitStr="♥";
-            else if (text.startsWith("♦")) suitStr="♦";
-
-            // 【重要修复】使用 suitStr.length() 而不是固定值 3
-            rankStr = text.mid(suitStr.length());
-        }
-
-        painter->setPen(textColor);
-
-        // 绘制左上角点数
-        QFont font = painter->font();
-        font.setBold(true);
-        font.setPixelSize(20); // 点数大小
-        painter->setFont(font);
-
-        // 【修改】调整文字坐标
-        QRect topRect = rect.adjusted(5, 5, 0, 0);
-
-        if (text.contains("joker")) {
-            // 大小王竖排显示
-            font.setPixelSize(12);
-            painter->setFont(font);
-            painter->drawText(topRect, Qt::AlignLeft | Qt::AlignTop, text.contains("Big") ? "大\n王" : "小\n王");
+        if (!pixmap.isNull()) {
+            QPixmap scaled = pixmap.scaled(rect.size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            QRect target(QPoint(0, 0), scaled.size());
+            target.moveCenter(rect.center());
+            painter->drawPixmap(target.topLeft(), scaled);
         } else {
-            painter->drawText(topRect, Qt::AlignLeft | Qt::AlignTop, rankStr);
+            // 如果找不到贴图，使用文字作为后备渲染
+            QColor textColor = (text.contains("♥") || text.contains("♦")) ? QColor(200, 0, 0) : QColor(30, 30, 30);
+            painter->setPen(textColor);
 
-            // 点数下面画个小花色
-            font.setPixelSize(14);
-            painter->setFont(font);
-            painter->drawText(topRect.adjusted(0, 22, 0, 0), Qt::AlignLeft | Qt::AlignTop, suitStr);
-        }
+            QString rankStr = text;
+            QString suitStr;
+            if (text.contains("jokerSmall", Qt::CaseInsensitive)) {
+                rankStr = "JOKER"; suitStr="BLACK";
+            }
+            else if (text.contains("jokerBig", Qt::CaseInsensitive)) {
+                rankStr = "JOKER"; suitStr="RED";
+            }
+            else {
+                if (text.startsWith("♠")) suitStr="♠";
+                else if (text.startsWith("♣")) suitStr="♣";
+                else if (text.startsWith("♥")) suitStr="♥";
+                else if (text.startsWith("♦")) suitStr="♦";
 
-        // 绘制中央大花色（水印效果）
-        if (!suitStr.isEmpty() && suitStr.length() < 5) {
-            font.setPixelSize(45);
+                rankStr = text.mid(suitStr.length());
+            }
+
+            QFont font = painter->font();
+            font.setBold(true);
+            font.setPixelSize(20);
             painter->setFont(font);
-            painter->setOpacity(0.2); // 半透明
-            painter->drawText(rect, Qt::AlignCenter, suitStr);
+
+            QRect topRect = rect.adjusted(8, 10, -8, -8);
+
+            if (text.contains("joker", Qt::CaseInsensitive)) {
+                font.setPixelSize(14);
+                painter->setFont(font);
+                painter->drawText(topRect, Qt::AlignLeft | Qt::AlignTop, text.contains("Big") ? "大\n王" : "小\n王");
+            } else {
+                painter->drawText(topRect, Qt::AlignLeft | Qt::AlignTop, rankStr);
+
+                font.setPixelSize(14);
+                painter->setFont(font);
+                painter->drawText(topRect.adjusted(0, 22, 0, 0), Qt::AlignLeft | Qt::AlignTop, suitStr);
+            }
+
+            if (!suitStr.isEmpty() && suitStr.length() < 5) {
+                font.setPixelSize(42);
+                painter->setFont(font);
+                painter->setOpacity(0.15);
+                painter->drawText(rect, Qt::AlignCenter, suitStr);
+            }
         }
 
         painter->restore();
     }
+
+private:
+    QString resourcePathForCard(const QString &text) const {
+        if (text.isEmpty()) return {};
+        if (text.compare("BACK", Qt::CaseInsensitive) == 0) {
+            return QStringLiteral(":/cards/back/card_back.png");
+        }
+        if (text.contains("jokerSmall", Qt::CaseInsensitive)) {
+            return QStringLiteral(":/cards/jokers/joker_small.png");
+        }
+        if (text.contains("jokerBig", Qt::CaseInsensitive)) {
+            return QStringLiteral(":/cards/jokers/joker_big.png");
+        }
+
+        const QChar suitChar = text.front();
+        QString suitKey;
+        if (suitChar == QChar(u'♠')) suitKey = "spades";
+        else if (suitChar == QChar(u'♣')) suitKey = "clubs";
+        else if (suitChar == QChar(u'♦')) suitKey = "diamonds";
+        else if (suitChar == QChar(u'♥')) suitKey = "hearts";
+        if (suitKey.isEmpty()) return {};
+
+        QString rank = text.mid(1);
+        if (rank.isEmpty()) return {};
+
+        return QString(":/cards/front/%1_%2.png").arg(suitKey, rank);
+    }
+
+    QPixmap pixmapForPath(const QString &path) const {
+        if (path.isEmpty()) return {};
+        auto it = cache.find(path);
+        if (it != cache.end()) return it.value();
+
+        QPixmap pix(path);
+        cache.insert(path, pix);
+        return pix;
+    }
+
+    mutable QHash<QString, QPixmap> cache;
 };
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
@@ -279,36 +313,34 @@ void MainWindow::setupUI()
     makePlayWidgetDefault(playRight);
     makePlayWidgetDefault(playCenterBottom);
     // 辅助函数：创建一个带头像和文字的垂直布局
-    auto createPlayerInfoWidget = [](QString name, QListWidget* remainList = nullptr) -> QWidget* {
-        QWidget* box = new QWidget;
-        QVBoxLayout* layout = new QVBoxLayout(box);
-        layout->setSpacing(6);
-        layout->setContentsMargins(6, 6, 6, 6);
+    auto createPlayerLayout = [](QString name, QWidget* playArea, QListWidget* remainList = nullptr) -> QVBoxLayout* {
+        QVBoxLayout* box = new QVBoxLayout;
 
+        // 模拟头像
         QLabel* avatar = new QLabel;
-        avatar->setPixmap(QPixmap(60, 60));
-        avatar->setStyleSheet("QLabel { background-color: #F1C40F; border-radius: 30px; color: #4A235A; font-size: 24px; border: 2px solid white; }");
+        avatar->setPixmap(QPixmap(60, 60)); // 实际应用请用 setPixmap(QPixmap(":/img/avatar.png"));
+        avatar->setStyleSheet("background-color: #DDD; border-radius: 30px; border: 2px solid white;");
         avatar->setFixedSize(60, 60);
         avatar->setAlignment(Qt::AlignCenter);
-        avatar->setText(name.left(1));
+        avatar->setText(name.left(1)); // 显示名字首字母当头像
+        avatar->setStyleSheet("QLabel { background-color: #F1C40F; border-radius: 30px; color: #4A235A; font-size: 24px; border: 2px solid white; }");
 
         QLabel* nameLbl = new QLabel(name);
-        nameLbl->setAlignment(Qt::AlignCenter);
 
-        layout->addWidget(avatar, 0, Qt::AlignCenter);
-        layout->addWidget(nameLbl, 0, Qt::AlignCenter);
+        box->addWidget(avatar, 0, Qt::AlignCenter);
+        box->addWidget(nameLbl, 0, Qt::AlignCenter);
         if (remainList) {
             remainList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             remainList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             remainList->setFrameShape(QFrame::NoFrame);
             remainList->setStyleSheet("QListWidget { color: #F8E71C; font-weight: bold; background: transparent; }");
             remainList->setFixedHeight(28);
-            layout->addWidget(remainList, 0, Qt::AlignCenter);
+            box->addWidget(remainList, 0, Qt::AlignCenter);
         }
-
+        box->addWidget(playArea, 0, Qt::AlignCenter);
         return box;
     };
-    // --- 布局：带牌桌的中心区域，外加独立的手牌区域 ---
+    // --- 布局：带面板的 3x3 中心区域，外加独立的手牌区域 ---
     QVBoxLayout *mainLay = new QVBoxLayout;
 
     auto applyShadow = [](QWidget *w) {
@@ -322,68 +354,52 @@ void MainWindow::setupUI()
     QFrame *boardFrame = new QFrame;
     boardFrame->setObjectName("boardFrame");
     applyShadow(boardFrame);
+    QGridLayout *boardGrid = new QGridLayout(boardFrame);
+    boardGrid->setContentsMargins(16, 12, 16, 12);
+    boardGrid->setHorizontalSpacing(20);
+    boardGrid->setVerticalSpacing(12);
+    boardGrid->setColumnStretch(0, 1);
+    boardGrid->setColumnStretch(1, 2);
+    boardGrid->setColumnStretch(2, 1);
 
-    QWidget *topInfo = createPlayerInfoWidget("AI 电脑 2", listAI2);
-    QWidget *leftInfo = createPlayerInfoWidget("AI 电脑 3", listAI3);
-    QWidget *rightInfo = createPlayerInfoWidget("AI 电脑 1", listAI1);
-    QWidget *humanInfo = createPlayerInfoWidget("玩家本人", nullptr);
+    QVBoxLayout *topBox = createPlayerLayout("AI 电脑 2", playTop, listAI2);
+    QVBoxLayout *leftBox = createPlayerLayout("AI 电脑 3", playLeft, listAI3);
+    QVBoxLayout *rightBox = createPlayerLayout("AI 电脑 1", playRight, listAI1);
 
-    QVBoxLayout *boardLayout = new QVBoxLayout(boardFrame);
-    boardLayout->setContentsMargins(16, 12, 16, 12);
-    boardLayout->setSpacing(10);
-
-    boardLayout->addWidget(topInfo, 0, Qt::AlignHCenter);
-
-    QFrame *tableSurface = new QFrame;
-    tableSurface->setObjectName("tableSurface");
-    QGridLayout *tableGrid = new QGridLayout(tableSurface);
-    tableGrid->setContentsMargins(24, 24, 24, 24);
-    tableGrid->setHorizontalSpacing(6);
-    tableGrid->setVerticalSpacing(6);
-    tableGrid->setColumnStretch(0, 1);
-    tableGrid->setColumnStretch(1, 2);
-    tableGrid->setColumnStretch(2, 1);
-    tableGrid->setRowStretch(0, 1);
-    tableGrid->setRowStretch(1, 2);
-    tableGrid->setRowStretch(2, 1);
-
-    QWidget *centerInfo = new QWidget;
-    centerInfo->setAttribute(Qt::WA_StyledBackground, false);
-    centerInfo->setStyleSheet("background: transparent;");
-    QVBoxLayout *centerBox = new QVBoxLayout(centerInfo);
+    // center column: can show game status / last plays overall
+    QVBoxLayout *centerBox = new QVBoxLayout;
     centerBox->setAlignment(Qt::AlignCenter);
     centerBox->setSpacing(6);
     centerBox->addWidget(lblLastPlay, 0, Qt::AlignCenter);
     centerBox->addWidget(lblStatus, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevels, 0, Qt::AlignCenter);
     centerBox->addWidget(lblLevelCard, 0, Qt::AlignCenter);
-    tableCenterLayout->addLayout(centerBox);
 
-    tableGrid->addWidget(playTop, 0, 1, Qt::AlignHCenter | Qt::AlignTop);
-    tableGrid->addWidget(playLeft, 1, 0, Qt::AlignLeft | Qt::AlignVCenter);
-    tableGrid->addWidget(centerInfo, 1, 1, Qt::AlignCenter);
-    tableGrid->addWidget(playRight, 1, 2, Qt::AlignRight | Qt::AlignVCenter);
-    tableGrid->addWidget(playCenterBottom, 2, 1, Qt::AlignHCenter | Qt::AlignBottom);
-
+    QVBoxLayout *humanPlayBox = new QVBoxLayout;
     QLabel *deskTitle = new QLabel("桌面 - 你的出牌");
     deskTitle->setAlignment(Qt::AlignCenter);
+    humanPlayBox->addWidget(deskTitle, 0, Qt::AlignCenter);
+    humanPlayBox->addWidget(playCenterBottom, 0, Qt::AlignCenter);
 
-    QHBoxLayout *middleRow = new QHBoxLayout;
-    middleRow->setSpacing(12);
-    middleRow->addWidget(leftInfo, 0, Qt::AlignTop);
-    middleRow->addWidget(tableSurface, 1);
-    middleRow->addWidget(rightInfo, 0, Qt::AlignTop);
-
-    boardLayout->addLayout(middleRow);
-    boardLayout->addWidget(deskTitle, 0, Qt::AlignCenter);
-    boardLayout->addWidget(humanInfo, 0, Qt::AlignHCenter);
+    boardGrid->addLayout(topBox, 0, 1, Qt::AlignCenter);
+    boardGrid->addLayout(leftBox, 1, 0, Qt::AlignCenter);
+    boardGrid->addLayout(centerBox, 1, 1);
+    boardGrid->addLayout(rightBox, 1, 2, Qt::AlignCenter);
+    boardGrid->addLayout(humanPlayBox, 2, 0, 1, 3);
 
     QFrame *handFrame = new QFrame;
     handFrame->setObjectName("handFrame");
     applyShadow(handFrame);
+    if (auto handShadow = qobject_cast<QGraphicsDropShadowEffect*>(handFrame->graphicsEffect())) {
+        handShadow->setColor(QColor(0, 0, 0, 80));
+        handShadow->setBlurRadius(14);
+        handShadow->setOffset(0, 4);
+    }
     QVBoxLayout *handLayout = new QVBoxLayout(handFrame);
     handLayout->setContentsMargins(16, 12, 16, 12);
     handLayout->setSpacing(8);
+
+
     QLabel *handTitle = new QLabel("你的手牌");
     handTitle->setAlignment(Qt::AlignCenter);
     handLayout->addWidget(handTitle);
@@ -458,10 +474,10 @@ void MainWindow::setupUI()
     };
 
     polishList(listHuman, 90, 120, -28, true);      // 底部手牌，图标 90x120，重叠 -28，支持横向滚动
-    polishList(playTop, 70, 90, -46);         // 顶部AI出牌区，稍小但保持堆叠
-    polishList(playLeft, 70, 90, -46);
-    polishList(playRight, 70, 90, -46);
-    polishList(playCenterBottom, 80, 100, -42); // 中央桌面显示区，保持明显重叠
+    polishList(playTop, 70, 90, -40);         // 顶部AI出牌区，稍小
+    polishList(playLeft, 70, 90, -40);
+    polishList(playRight, 70, 90, -40);
+    polishList(playCenterBottom, 80, 100, -38); // 中央桌面显示区
 
     // 2. 全局 QSS 样式表
     QString qss = R"(
@@ -506,19 +522,20 @@ void MainWindow::setupUI()
             outline: none;
         }
 
-        QFrame#boardFrame, QFrame#handFrame {
+ QFrame#boardFrame {
             background: rgba(10, 40, 24, 0.45);
             border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 16px;
             padding: 10px;
         }
 
-        QFrame#tableSurface {
-            background: qradialgradient(cx:0.5, cy:0.5, fx:0.5, fy:0.45, radius:1,
-                stop:0 #126f3a, stop:1 #0a3f24);
-            border: 2px solid rgba(255, 255, 255, 0.16);
-            border-radius: 18px;
-            min-height: 260px;
+        /* 手牌区域：更浅、更透明的玻璃效果，融入背景 */
+        QFrame#handFrame {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(255, 255, 255, 0.08), stop:1 rgba(255, 255, 255, 0.03));
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 16px;
+            padding: 12px;
         }
 
         QScrollArea {

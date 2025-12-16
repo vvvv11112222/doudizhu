@@ -346,11 +346,23 @@ void Judge::nextTurn() {
     if (allOthersPassed()) {
         int leader = lastPlayer;
         if (leader < 0) leader = currentTurn;
+
         if (leader >= 0 && players[leader]->getCardCount() == 0) {
-            int mate = teammateOf(leader);
-            if (mate >= 0 && players[mate]->getCardCount() > 0) {
-                leader = mate;
-                qInfo() << "借风出牌：队友" << leader << "承接出牌权";
+            if (!finishOrder.empty() && finishOrder.front() == leader) {
+                int mate = teammateOf(leader);
+                if (mate >= 0 && players[mate]->getCardCount() > 0) {
+                    leader = mate;
+                    qInfo() << "接风出牌：头游队友" << leader << "承接出牌权";
+                }
+            }
+
+            // 如果仍然无人可出（或头游队友也没牌），顺时针找到下一个仍有手牌的玩家
+            if (leader >= 0 && players[leader]->getCardCount() == 0) {
+                int nextWithCards = advanceTurnIndex(leader);
+                if (nextWithCards >= 0) {
+                    leader = nextWithCards;
+                    qInfo() << "当前玩家已出完，顺延到玩家" << leader;
+                }
             }
         }
         startNewRound(leader);
@@ -814,27 +826,8 @@ bool Judge::submitTribute(int playerId, const Card& card) {
 void Judge::finishTributePhase() {
     gamePhase = GamePhase::Playing;
 
-    // 进贡结束，由进贡者（输家）先出牌
-    // 规则：如果是单贡，进贡者先出；
-    // 如果是双贡，由进贡大牌者先出？或者上一局的末游？
-    // 掼蛋通用规则：进贡给谁，谁就有出牌权（如果还贡了，出牌权通常归还给进贡者）
-    // 通行规则：也就是进贡的那一方（末游）出牌。
-
-    // 如果抗贡，则由头游（赢家）出牌。
-
-    int leader = 0;
-
-    // 简单判定：如果没有活跃的进贡，Winner 先出
-    bool anyTribute = false;
-    for (auto t : tributeList) if (t.active) anyTribute = true;
-
-    if (!anyTribute) {
-        leader = previousPlacements[0]; // 抗贡，头游先出
-    } else {
-        // 有进贡，通常规定进贡最大牌的人先出。
-        // 这里简化：单贡时，最后一名先出。双贡时，第4名先出。
-        leader = previousPlacements.back();
-    }
+    // 进贡结束后，无论是否发生进贡，均由上一局头游先手
+    int leader = previousPlacements.empty() ? 0 : previousPlacements[0];
 
     startNewRound(leader);
 

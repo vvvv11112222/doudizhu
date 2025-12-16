@@ -99,7 +99,7 @@ PlayInfo HandMatcher::matchTianWang() {
 // 2. 炸弹 (4+张)
 PlayInfo HandMatcher::matchBomb() {
     // 基础条件：炸弹至少4张
-    if (totalCount < 4 || totalCount == 5) return {};
+    if (totalCount < 4) return {};
 
     for (const auto& c : solids) {
         if (c.getRank() == Rank::S || c.getRank() == Rank::B) return {};
