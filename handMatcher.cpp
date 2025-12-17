@@ -1,12 +1,16 @@
 #include "handmatcher.h"
 #include <set>
 #include <cmath>
+#include <algorithm>
 
 // ==========================================
 // 构造与初始化
 // ==========================================
 HandMatcher::HandMatcher(const std::vector<Card>& cards, int lvlRank)
-    : wildCount(0), levelRank(lvlRank), totalCount(static_cast<int>(cards.size()))
+    : allCards(cards)
+    , wildCount(0)
+    , levelRank(lvlRank)
+    , totalCount(static_cast<int>(cards.size()))
 {
     solids.reserve(cards.size());
 
@@ -101,32 +105,50 @@ PlayInfo HandMatcher::matchBomb() {
     // 基础条件：炸弹至少4张
     if (totalCount < 4) return {};
 
+    // 允许使用红桃级牌补齐，但必须有至少一张固定牌来确定炸弹点数
+    if (solids.empty()) return {};
+
+    // 偏防御性检查：总牌数必须等于固定牌 + 万能牌
+    if (static_cast<int>(solids.size()) + wildCount != totalCount) return {};
+
     for (const auto& c : solids) {
         if (c.getRank() == Rank::S || c.getRank() == Rank::B) return {};
     }
 
-    if (solids.empty()) {
-        return {}; // 这种情况属于非法数据或作弊，直接返回无效
-    }
-
     int firstVal = getLogValue(solids[0]);
-    for (size_t i = 1; i < solids.size(); ++i) {
-        if (getLogValue(solids[i]) != firstVal) {
-            return {};
-        }
-    }
+    const bool sameRank = std::all_of(solids.begin(), solids.end(), [&](const Card& c) {
+        return getLogValue(c) == firstVal;
+    });
+    if (!sameRank) return {};
+
     return {HandType::Bomb, firstVal, totalCount};
 }
 
 // 3. 同花顺
 PlayInfo HandMatcher::matchStraightFlush() {
     if (totalCount != 5) return {};
-    if (!solids.empty()) {
-        Suit s = solids[0].getSuit();
-        for (const auto& c : solids) {
-            if (c.getSuit() != s) return {};
+
+    // 1) 花色必须统一且必须能确定花色
+    if (allCards.empty()) return {};
+
+    Suit suitRef = Suit::None;
+    for (const auto& c : allCards) {
+        if (c.getRank() == Rank::S || c.getRank() == Rank::B) return {}; // 大小王不能参与同花顺
+        if (!isWild(c)) {
+            if (suitRef == Suit::None) suitRef = c.getSuit();
+            else if (c.getSuit() != suitRef) return {};
         }
     }
+
+    // 如果全是万能牌，则无法确定花色，视为无效
+    if (suitRef == Suit::None) return {};
+
+    // 万能牌视作指定花色，检查其他牌是否冲突
+    for (const auto& c : allCards) {
+        if (isWild(c)) continue;
+        if (c.getSuit() != suitRef) return {};
+    }
+
     int top = checkStraightRank();
     if (top > 0) {
         return {HandType::StraightFlush, top, 5, true};
@@ -301,7 +323,7 @@ PlayInfo HandMatcher::matchConsecutiveTuples(int tupleCount, int tupleSize, Hand
 
 // 检查顺子序列 (核心算法修改版)
 int HandMatcher::checkStraightRank() const {
-    if (solids.empty()) return 14;
+    if (solids.empty()) return 0; // 无固定牌无法判定顺子
     std::vector<int> seqs;
     for (const auto& c : solids) {
         int v = getSeqValue(c);
@@ -309,6 +331,7 @@ int HandMatcher::checkStraightRank() const {
         seqs.push_back(v);
     }
     std::sort(seqs.begin(), seqs.end());
+    bool hasA = std::find(seqs.begin(), seqs.end(), 14) != seqs.end();
 
     std::vector<int> uniq = seqs;
     auto last = std::unique(uniq.begin(), uniq.end());
@@ -341,7 +364,6 @@ int HandMatcher::checkStraightRank() const {
     };
 
     // --- 策略 1: 特殊同花顺 A2345 (A当作1) ---
-    bool hasA = (seqs.back() == 14);
     if (hasA) {
         std::vector<int> lowSeqs = seqs;
         // 将 A(14) 变为 1，并重新排序
@@ -370,5 +392,10 @@ int HandMatcher::checkStraightRank() const {
     // 例如: 3,4,6. Max=6, Min=3. Count=3. (6-3+1)-3 = 1. 缺1张(5)
     int missing = (maxV - minV + 1) - count;
 
-    return calcResult(maxV, missing);
+    int res = calcResult(maxV, missing);
+
+    // A 只能出现在顺子的首尾（A2345 或 10JQKA），否则视为无效
+    if (hasA && res != 5 && res != 14) return 0;
+
+    return res;
 }
