@@ -135,6 +135,14 @@ static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& l
     if (currentInfo.type == HandType::TianWang) return true;
 
     // 炸弹体系处理
+    // 优先保证炸弹之间按照张数进行比较，避免出现“小炸弹压制大炸弹”的情况
+    if (lastInfo.type == HandType::Bomb && currentInfo.type == HandType::Bomb) {
+        if (currentInfo.size != lastInfo.size) {
+            return currentInfo.size > lastInfo.size;
+        }
+        return currentInfo.primaryRank > lastInfo.primaryRank;
+    }
+
     auto bombPriority = [](const PlayInfo& info) {
         if (info.type == HandType::TianWang) return 1000;
         if (info.type == HandType::Bomb && info.size >= 6) return info.size*10;
@@ -150,7 +158,7 @@ static bool canBeat(const std::vector<Card>& current, const std::vector<Card>& l
     if (lastBombScore > 0 || curBombScore > 0) {
         if (curBombScore == 0) return false; // 非炸弹无法压炸弹
         if (curBombScore != lastBombScore) return curBombScore > lastBombScore;
-         return currentInfo.primaryRank > lastInfo.primaryRank;
+        return currentInfo.primaryRank > lastInfo.primaryRank;
     }
 
     if (currentInfo.type != lastInfo.type) return false;

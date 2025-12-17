@@ -105,19 +105,22 @@ PlayInfo HandMatcher::matchBomb() {
     // 基础条件：炸弹至少4张
     if (totalCount < 4) return {};
 
-    // 炸弹必须全部同点数，不允许使用红桃级牌来“补牌”
-    if (wildCount > 0) return {};
+    // 允许使用红桃级牌补齐，但必须有至少一张固定牌来确定炸弹点数
+    if (solids.empty()) return {};
+
+    // 偏防御性检查：总牌数必须等于固定牌 + 万能牌
+    if (static_cast<int>(solids.size()) + wildCount != totalCount) return {};
 
     for (const auto& c : solids) {
         if (c.getRank() == Rank::S || c.getRank() == Rank::B) return {};
     }
 
     int firstVal = getLogValue(solids[0]);
-    for (size_t i = 1; i < solids.size(); ++i) {
-        if (getLogValue(solids[i]) != firstVal) {
-            return {};
-        }
-    }
+    const bool sameRank = std::all_of(solids.begin(), solids.end(), [&](const Card& c) {
+        return getLogValue(c) == firstVal;
+    });
+    if (!sameRank) return {};
+
     return {HandType::Bomb, firstVal, totalCount};
 }
 
