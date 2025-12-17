@@ -893,9 +893,16 @@ void MainWindow::updateUI() {
 
     // 2. 刷新 AI 剩余张数
     // 更新侧边栏文字
-    listAI1->clear(); listAI1->addItem(QString("剩 %1 张").arg(judge->getPlayerHandCount(1)));
-    listAI2->clear(); listAI2->addItem(QString("剩 %1 张").arg(judge->getPlayerHandCount(2)));
-    listAI3->clear(); listAI3->addItem(QString("剩 %1 张").arg(judge->getPlayerHandCount(3)));
+    auto updateRemainList = [](QListWidget *list, int count) {
+        list->clear();
+        if (count < 10) {
+            list->addItem(QString("剩 %1 张").arg(count));
+        }
+    };
+
+    updateRemainList(listAI1, judge->getPlayerHandCount(1));
+    updateRemainList(listAI2, judge->getPlayerHandCount(2));
+    updateRemainList(listAI3, judge->getPlayerHandCount(3));
 
     // 3. 刷新桌面出牌区域（核心修改）
     auto updateTableArea = [&](int playerId, QListWidget* area) {
